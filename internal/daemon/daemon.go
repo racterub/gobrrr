@@ -16,12 +16,13 @@ import (
 
 // Daemon is the HTTP daemon that serves the gobrrr API over a Unix socket.
 type Daemon struct {
-	cfg       *config.Config
-	socket    string
-	gobrrDir  string
-	mux       *http.ServeMux
-	queue     *Queue
-	startTime time.Time
+	cfg        *config.Config
+	socket     string
+	gobrrDir   string
+	mux        *http.ServeMux
+	queue      *Queue
+	workerPool *WorkerPool
+	startTime  time.Time
 }
 
 // New creates a new Daemon configured to listen on the given socket path.
@@ -39,12 +40,16 @@ func New(cfg *config.Config, socket string) *Daemon {
 		q = loaded
 	}
 
+	spawnInterval := time.Duration(cfg.SpawnIntervalSec) * time.Second
+	wp := NewWorkerPool(q, cfg.MaxWorkers, spawnInterval, gobrrDir)
+
 	d := &Daemon{
-		cfg:      cfg,
-		socket:   socket,
-		gobrrDir: gobrrDir,
-		mux:      http.NewServeMux(),
-		queue:    q,
+		cfg:        cfg,
+		socket:     socket,
+		gobrrDir:   gobrrDir,
+		mux:        http.NewServeMux(),
+		queue:      q,
+		workerPool: wp,
 	}
 	d.mux.HandleFunc("/health", d.handleHealth)
 	d.mux.HandleFunc("POST /tasks", d.handleSubmitTask)
@@ -59,6 +64,9 @@ func New(cfg *config.Config, socket string) *Daemon {
 // It returns nil on graceful shutdown.
 func (d *Daemon) Run(ctx context.Context) error {
 	d.startTime = time.Now()
+
+	// Start the worker pool in the background.
+	go d.workerPool.Run(ctx)
 
 	// Remove any stale socket file before binding.
 	_ = os.Remove(d.socket)
@@ -103,7 +111,7 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 	resp := healthResponse{
 		Status:        "ok",
 		UptimeSec:     int64(time.Since(d.startTime).Seconds()),
-		WorkersActive: 0,
+		WorkersActive: d.workerPool.Active(),
 		QueueDepth:    len(activeTasks),
 	}
 	w.Header().Set("Content-Type", "application/json")
