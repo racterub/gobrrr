@@ -11,6 +11,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/racterub/gobrrr/internal/identity"
+	"github.com/racterub/gobrrr/internal/memory"
 )
 
 // ErrTimeout is returned by runWorker when the worker process exceeds its timeout.
@@ -128,26 +131,32 @@ type WorkerPool struct {
 	lastSpawn     time.Time
 	queue         *Queue
 	gobrrDir      string
+	memStore      *memory.Store
 	buildCommand  func(task *Task) *WorkerConfig
 }
 
 // NewWorkerPool creates a new WorkerPool. spawnInterval is the minimum duration
 // between spawning successive workers. Pass 0 for no rate limiting.
-func NewWorkerPool(queue *Queue, maxWorkers int, spawnInterval time.Duration, gobrrDir string) *WorkerPool {
+func NewWorkerPool(queue *Queue, maxWorkers int, spawnInterval time.Duration, gobrrDir string, ms *memory.Store) *WorkerPool {
 	wp := &WorkerPool{
 		maxWorkers:    maxWorkers,
 		spawnInterval: spawnInterval,
 		queue:         queue,
 		gobrrDir:      gobrrDir,
+		memStore:      ms,
 	}
 	wp.buildCommand = wp.defaultBuildCommand
 	return wp
 }
 
 // defaultBuildCommand builds the WorkerConfig for a task using the claude CLI.
+// It loads the identity file and relevant memories to build a full prompt.
 func (wp *WorkerPool) defaultBuildCommand(task *Task) *WorkerConfig {
 	logDir := filepath.Join(wp.gobrrDir, "logs")
 	logPath := filepath.Join(logDir, task.ID+".log")
+
+	// Build the full prompt with identity + memories.
+	prompt := wp.buildFullPrompt(task.Prompt)
 
 	args := []string{
 		"--print",
@@ -156,7 +165,7 @@ func (wp *WorkerPool) defaultBuildCommand(task *Task) *WorkerConfig {
 	if !task.AllowWrites {
 		args = append(args, "--allowedTools", "Read,Glob,Grep,Bash")
 	}
-	args = append(args, task.Prompt)
+	args = append(args, prompt)
 
 	return &WorkerConfig{
 		Command:    "claude",
@@ -165,6 +174,28 @@ func (wp *WorkerPool) defaultBuildCommand(task *Task) *WorkerConfig {
 		WorkDir:    wp.gobrrDir,
 		LogPath:    logPath,
 	}
+}
+
+// buildFullPrompt loads identity and relevant memories and returns the full
+// prompt to pass to claude. On any error it falls back to the raw task prompt.
+func (wp *WorkerPool) buildFullPrompt(taskPrompt string) string {
+	ident, err := identity.Load(wp.gobrrDir)
+	if err != nil {
+		return taskPrompt
+	}
+
+	var memContents []string
+	if wp.memStore != nil {
+		all, err := wp.memStore.List(0)
+		if err == nil && len(all) > 0 {
+			relevant := memory.MatchRelevant(all, taskPrompt, 10)
+			for _, e := range relevant {
+				memContents = append(memContents, e.Content)
+			}
+		}
+	}
+
+	return identity.BuildPrompt(ident, memContents, taskPrompt)
 }
 
 // Run starts the worker pool loop, ticking every second to check for available

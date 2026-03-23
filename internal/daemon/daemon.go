@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/racterub/gobrrr/internal/config"
+	"github.com/racterub/gobrrr/internal/memory"
 )
 
 // Daemon is the HTTP daemon that serves the gobrrr API over a Unix socket.
@@ -22,6 +24,7 @@ type Daemon struct {
 	mux        *http.ServeMux
 	queue      *Queue
 	workerPool *WorkerPool
+	memStore   *memory.Store
 	startTime  time.Time
 }
 
@@ -41,7 +44,9 @@ func New(cfg *config.Config, socket string) *Daemon {
 	}
 
 	spawnInterval := time.Duration(cfg.SpawnIntervalSec) * time.Second
-	wp := NewWorkerPool(q, cfg.MaxWorkers, spawnInterval, gobrrDir)
+	memDir := filepath.Join(gobrrDir, "memory")
+	ms := memory.NewStore(memDir)
+	wp := NewWorkerPool(q, cfg.MaxWorkers, spawnInterval, gobrrDir, ms)
 
 	d := &Daemon{
 		cfg:        cfg,
@@ -50,6 +55,7 @@ func New(cfg *config.Config, socket string) *Daemon {
 		mux:        http.NewServeMux(),
 		queue:      q,
 		workerPool: wp,
+		memStore:   ms,
 	}
 	d.mux.HandleFunc("/health", d.handleHealth)
 	d.mux.HandleFunc("POST /tasks", d.handleSubmitTask)
@@ -57,6 +63,10 @@ func New(cfg *config.Config, socket string) *Daemon {
 	d.mux.HandleFunc("GET /tasks/{id}", d.handleGetTask)
 	d.mux.HandleFunc("DELETE /tasks/{id}", d.handleCancelTask)
 	d.mux.HandleFunc("GET /tasks/{id}/logs", d.handleGetTaskLogs)
+	d.mux.HandleFunc("POST /memory", d.handleSaveMemory)
+	d.mux.HandleFunc("GET /memory", d.handleSearchMemory)
+	d.mux.HandleFunc("GET /memory/{id}", d.handleGetMemory)
+	d.mux.HandleFunc("DELETE /memory/{id}", d.handleDeleteMemory)
 	return d
 }
 
@@ -208,4 +218,107 @@ func (d *Daemon) handleGetTaskLogs(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write(data) //nolint:errcheck
+}
+
+// --- memory handlers ---
+
+type saveMemoryRequest struct {
+	Content string   `json:"content"`
+	Tags    []string `json:"tags"`
+	Source  string   `json:"source"`
+}
+
+func (d *Daemon) handleSaveMemory(w http.ResponseWriter, r *http.Request) {
+	var req saveMemoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Content == "" {
+		http.Error(w, `{"error":"content is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	entry, err := d.memStore.Save(req.Content, req.Tags, req.Source)
+	if err != nil {
+		http.Error(w, `{"error":"failed to save memory"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(entry) //nolint:errcheck
+}
+
+func (d *Daemon) handleSearchMemory(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	tagsParam := r.URL.Query().Get("tags")
+	limitParam := r.URL.Query().Get("limit")
+
+	var tags []string
+	if tagsParam != "" {
+		for _, t := range strings.Split(tagsParam, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				tags = append(tags, t)
+			}
+		}
+	}
+
+	limit := 0
+	if limitParam != "" {
+		if n, err := strconv.Atoi(limitParam); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	var entries []*memory.Entry
+	var err error
+	if q != "" || len(tags) > 0 {
+		entries, err = d.memStore.Search(q, tags, limit)
+	} else {
+		entries, err = d.memStore.List(limit)
+	}
+	if err != nil {
+		http.Error(w, `{"error":"failed to search memory"}`, http.StatusInternalServerError)
+		return
+	}
+	if entries == nil {
+		entries = []*memory.Entry{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(entries) //nolint:errcheck
+}
+
+func (d *Daemon) handleGetMemory(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if strings.ContainsAny(id, "/\\") {
+		http.Error(w, `{"error":"invalid memory id"}`, http.StatusBadRequest)
+		return
+	}
+
+	entry, err := d.memStore.Get(id)
+	if err != nil {
+		http.Error(w, `{"error":"memory not found"}`, http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(entry) //nolint:errcheck
+}
+
+func (d *Daemon) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if strings.ContainsAny(id, "/\\") {
+		http.Error(w, `{"error":"invalid memory id"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := d.memStore.Delete(id); err != nil {
+		http.Error(w, `{"error":"failed to delete memory"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

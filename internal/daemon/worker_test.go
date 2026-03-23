@@ -62,7 +62,7 @@ func TestWorkerPoolConcurrencyLimit(t *testing.T) {
 	q := NewQueue(queuePath)
 
 	// Use sleep long enough that the pool will be at max concurrency while we poll.
-	pool := NewWorkerPool(q, 2, 0, dir)
+	pool := NewWorkerPool(q, 2, 0, dir, nil)
 	pool.buildCommand = func(task *Task) *WorkerConfig {
 		return &WorkerConfig{
 			Command:    "sleep",
@@ -129,7 +129,7 @@ func TestWorkerPoolTaskResultStored(t *testing.T) {
 	queuePath := filepath.Join(dir, "queue.json")
 	q := NewQueue(queuePath)
 
-	pool := NewWorkerPool(q, 2, 0, dir)
+	pool := NewWorkerPool(q, 2, 0, dir, nil)
 	pool.buildCommand = func(task *Task) *WorkerConfig {
 		return &WorkerConfig{
 			Command:    "echo",

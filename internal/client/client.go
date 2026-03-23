@@ -9,8 +9,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/racterub/gobrrr/internal/daemon"
+	"github.com/racterub/gobrrr/internal/memory"
 )
 
 // Client communicates with the gobrrr daemon over a Unix socket.
@@ -162,6 +165,115 @@ func (c *Client) GetLogs(id string) (string, error) {
 		return "", fmt.Errorf("reading response: %w", err)
 	}
 	return string(data), nil
+}
+
+// --- memory methods ---
+
+type saveMemoryRequest struct {
+	Content string   `json:"content"`
+	Tags    []string `json:"tags"`
+	Source  string   `json:"source"`
+}
+
+// SaveMemory saves a new memory entry via the daemon.
+func (c *Client) SaveMemory(content string, tags []string, source string) (*memory.Entry, error) {
+	body := saveMemoryRequest{Content: content, Tags: tags, Source: source}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshalling request: %w", err)
+	}
+
+	resp, err := c.httpClient.Post(c.baseURL+"/memory", "application/json", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("POST /memory: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("unexpected status %d from POST /memory", resp.StatusCode)
+	}
+
+	var entry memory.Entry
+	if err := json.NewDecoder(resp.Body).Decode(&entry); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return &entry, nil
+}
+
+// SearchMemory searches memory entries. Pass empty query/tags for listing.
+func (c *Client) SearchMemory(query string, tags []string, limit int) ([]*memory.Entry, error) {
+	u, _ := url.Parse(c.baseURL + "/memory")
+	q := u.Query()
+	if query != "" {
+		q.Set("q", query)
+	}
+	if len(tags) > 0 {
+		q.Set("tags", strings.Join(tags, ","))
+	}
+	if limit > 0 {
+		q.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	u.RawQuery = q.Encode()
+
+	resp, err := c.httpClient.Get(u.String())
+	if err != nil {
+		return nil, fmt.Errorf("GET /memory: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %d from GET /memory", resp.StatusCode)
+	}
+
+	var entries []*memory.Entry
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return entries, nil
+}
+
+// GetMemory returns a single memory entry by ID.
+func (c *Client) GetMemory(id string) (*memory.Entry, error) {
+	resp, err := c.httpClient.Get(c.baseURL + "/memory/" + id)
+	if err != nil {
+		return nil, fmt.Errorf("GET /memory/%s: %w", id, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("memory %q not found", id)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %d from GET /memory/%s", resp.StatusCode, id)
+	}
+
+	var entry memory.Entry
+	if err := json.NewDecoder(resp.Body).Decode(&entry); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return &entry, nil
+}
+
+// DeleteMemory deletes a memory entry by ID.
+func (c *Client) DeleteMemory(id string) error {
+	req, err := http.NewRequest(http.MethodDelete, c.baseURL+"/memory/"+id, nil)
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("DELETE /memory/%s: %w", id, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("memory %q not found", id)
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status %d from DELETE /memory/%s", resp.StatusCode, id)
+	}
+	return nil
 }
 
 // Health returns the daemon health information.
