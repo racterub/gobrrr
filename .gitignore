@@ -1,0 +1,4 @@
+/gobrrr
+*.exe
+.gobrrr/
+vendor/
