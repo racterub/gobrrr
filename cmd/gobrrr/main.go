@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/racterub/gobrrr/internal/client"
 	"github.com/racterub/gobrrr/internal/config"
 	"github.com/racterub/gobrrr/internal/daemon"
 )
@@ -73,57 +74,123 @@ var daemonStartCmd = &cobra.Command{
 var daemonStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show daemon status",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("not implemented")
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		info, err := c.Health()
+		if err != nil {
+			return fmt.Errorf("daemon unreachable: %w", err)
+		}
+		fmt.Printf("Status:          %v\n", info["status"])
+		fmt.Printf("Uptime (sec):    %v\n", info["uptime_sec"])
+		fmt.Printf("Workers active:  %v\n", info["workers_active"])
+		fmt.Printf("Queue depth:     %v\n", info["queue_depth"])
+		return nil
 	},
 }
 
-// submitCmd submits a new task.
+// --- submit ---
+
+var (
+	submitPrompt      string
+	submitReplyTo     string
+	submitPriority    int
+	submitAllowWrites bool
+	submitTimeout     int
+)
+
 var submitCmd = &cobra.Command{
 	Use:   "submit",
 	Short: "Submit a new task",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("not implemented")
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if submitPrompt == "" {
+			return fmt.Errorf("--prompt is required")
+		}
+		c := newClient()
+		task, err := c.SubmitTask(submitPrompt, submitReplyTo, submitPriority, submitAllowWrites, submitTimeout)
+		if err != nil {
+			return err
+		}
+		printTask(task)
+		return nil
 	},
 }
 
-// listCmd lists tasks.
+// --- list ---
+
+var listAll bool
+
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List tasks",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("not implemented")
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		tasks, err := c.ListTasks(listAll)
+		if err != nil {
+			return err
+		}
+		if len(tasks) == 0 {
+			fmt.Println("No tasks.")
+			return nil
+		}
+		for _, t := range tasks {
+			printTaskSummary(t)
+		}
+		return nil
 	},
 }
 
-// statusCmd shows task status.
+// --- status (task) ---
+
 var statusCmd = &cobra.Command{
-	Use:   "status",
+	Use:   "status <id>",
 	Short: "Show task status",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("not implemented")
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		task, err := c.GetTask(args[0])
+		if err != nil {
+			return err
+		}
+		printTask(task)
+		return nil
 	},
 }
 
-// cancelCmd cancels a task.
+// --- cancel ---
+
 var cancelCmd = &cobra.Command{
-	Use:   "cancel",
+	Use:   "cancel <id>",
 	Short: "Cancel a task",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("not implemented")
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		if err := c.CancelTask(args[0]); err != nil {
+			return err
+		}
+		fmt.Printf("Task %s cancelled.\n", args[0])
+		return nil
 	},
 }
 
-// logsCmd shows task logs.
+// --- logs ---
+
 var logsCmd = &cobra.Command{
-	Use:   "logs",
+	Use:   "logs <id>",
 	Short: "Show task logs",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("not implemented")
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		logs, err := c.GetLogs(args[0])
+		if err != nil {
+			return err
+		}
+		fmt.Print(logs)
+		return nil
 	},
 }
 
-// approveCmd approves a pending task.
+// --- approve / deny / gmail / gcal / memory / setup (stubs) ---
+
 var approveCmd = &cobra.Command{
 	Use:   "approve",
 	Short: "Approve a pending task",
@@ -132,7 +199,6 @@ var approveCmd = &cobra.Command{
 	},
 }
 
-// denyCmd denies a pending task.
 var denyCmd = &cobra.Command{
 	Use:   "deny",
 	Short: "Deny a pending task",
@@ -141,7 +207,6 @@ var denyCmd = &cobra.Command{
 	},
 }
 
-// gmailCmd provides Gmail integration commands.
 var gmailCmd = &cobra.Command{
 	Use:   "gmail",
 	Short: "Gmail integration",
@@ -150,7 +215,6 @@ var gmailCmd = &cobra.Command{
 	},
 }
 
-// gcalCmd provides Google Calendar integration commands.
 var gcalCmd = &cobra.Command{
 	Use:   "gcal",
 	Short: "Google Calendar integration",
@@ -159,7 +223,6 @@ var gcalCmd = &cobra.Command{
 	},
 }
 
-// memoryCmd manages daemon memory.
 var memoryCmd = &cobra.Command{
 	Use:   "memory",
 	Short: "Manage daemon memory",
@@ -168,7 +231,6 @@ var memoryCmd = &cobra.Command{
 	},
 }
 
-// setupCmd runs first-time setup.
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Run first-time setup",
@@ -180,6 +242,14 @@ var setupCmd = &cobra.Command{
 func init() {
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
+
+	submitCmd.Flags().StringVar(&submitPrompt, "prompt", "", "Task prompt (required)")
+	submitCmd.Flags().StringVar(&submitReplyTo, "reply-to", "", "Reply destination (e.g. telegram)")
+	submitCmd.Flags().IntVar(&submitPriority, "priority", 5, "Task priority (lower = higher priority)")
+	submitCmd.Flags().BoolVar(&submitAllowWrites, "allow-writes", false, "Allow file writes")
+	submitCmd.Flags().IntVar(&submitTimeout, "timeout", 300, "Timeout in seconds")
+
+	listCmd.Flags().BoolVar(&listAll, "all", false, "Include completed/failed tasks")
 
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(submitCmd)
@@ -193,4 +263,39 @@ func init() {
 	rootCmd.AddCommand(gcalCmd)
 	rootCmd.AddCommand(memoryCmd)
 	rootCmd.AddCommand(setupCmd)
+}
+
+// newClient creates a Client connected to the configured socket path.
+func newClient() *client.Client {
+	gobrrDir := config.GobrrDir()
+	socketPath := filepath.Join(gobrrDir, "gobrrr.sock")
+	return client.New(socketPath)
+}
+
+// printTask prints full task details.
+func printTask(t *daemon.Task) {
+	fmt.Printf("ID:          %s\n", t.ID)
+	fmt.Printf("Status:      %s\n", t.Status)
+	fmt.Printf("Priority:    %d\n", t.Priority)
+	fmt.Printf("Prompt:      %s\n", t.Prompt)
+	fmt.Printf("Reply-To:    %s\n", t.ReplyTo)
+	fmt.Printf("Allow Writes:%v\n", t.AllowWrites)
+	fmt.Printf("Created:     %s\n", t.CreatedAt.Format("2006-01-02 15:04:05"))
+	if t.StartedAt != nil {
+		fmt.Printf("Started:     %s\n", t.StartedAt.Format("2006-01-02 15:04:05"))
+	}
+	if t.CompletedAt != nil {
+		fmt.Printf("Completed:   %s\n", t.CompletedAt.Format("2006-01-02 15:04:05"))
+	}
+	if t.Result != nil {
+		fmt.Printf("Result:      %s\n", *t.Result)
+	}
+	if t.Error != nil {
+		fmt.Printf("Error:       %s\n", *t.Error)
+	}
+}
+
+// printTaskSummary prints a one-line summary.
+func printTaskSummary(t *daemon.Task) {
+	fmt.Printf("%-26s  %-10s  p%-3d  %s\n", t.ID, t.Status, t.Priority, t.Prompt)
 }
