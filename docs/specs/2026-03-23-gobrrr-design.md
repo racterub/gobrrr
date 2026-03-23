@@ -181,6 +181,7 @@ Workers use the Claude Code CLI with the user's Max plan subscription. No API ke
 - Exit code 0 → `completed`, non-zero → `failed` (retried if retries remain)
 - Timeout: default 300s. On timeout: SIGTERM → 10s grace → SIGKILL → task `failed`
 - Working directory: `~/.gobrrr/workspace/`
+- Browser access via `agent-browser` (see Browser Integration section)
 
 ### Per-Task Settings
 
@@ -263,6 +264,61 @@ After setup, fully headless. The daemon uses the refresh token to get short-live
 - Delete event
 
 All API calls are made by the daemon process, never by workers. Workers call `gobrrr gmail` / `gobrrr gcal` which talks to the daemon over Unix socket.
+
+## Browser Integration
+
+Workers can browse the web via **agent-browser** (Vercel, Rust binary). This is preferred over Playwright MCP because it's more token-efficient — CLI output only enters context, no large MCP tool schemas or verbose accessibility trees.
+
+### Why agent-browser over Playwright MCP
+
+- **Token efficiency**: Snapshot filtering (`-i` interactive only, `-c` compact, `-d` depth limit, `-s` CSS selector scope) keeps context lean
+- **Performance**: Rust binary, ~50ms per CLI call, background Chrome daemon
+- **No Node.js dependency**: Just Chrome + the Rust binary
+- **Batch execution**: Multiple actions in one invocation reduces round-trips
+- **Content boundaries**: `--content-boundaries` flag for LLM safety (complements our UNTRUSTED markers)
+
+### Setup
+
+The `gobrrr setup` wizard installs agent-browser and its dependencies:
+
+```bash
+# Install agent-browser
+npm install -g @anthropic-ai/agent-browser  # or cargo install, or direct binary
+
+# Install Chrome for Testing (headless)
+agent-browser install --with-deps
+```
+
+Chrome runs headless — no display server (X11/Wayland) needed on the LXC.
+
+### Worker Access
+
+Workers get `agent-browser` in their permissions allowlist:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(gobrrr *)",
+      "Bash(agent-browser *)",
+      "Read", "Glob", "Grep"
+    ]
+  }
+}
+```
+
+A SKILL.md in `skills/browser/` teaches workers how to use agent-browser:
+- `agent-browser open <url>` — open a page
+- `agent-browser snapshot -i -c` — get interactive elements (compact)
+- `agent-browser click @e2` — click an element by ref
+- `agent-browser fill @e5 "search query"` — fill a form field
+- `agent-browser screenshot` — take a screenshot (for vision-capable tasks)
+
+### Security Considerations
+
+- Workers can browse the web, which exposes them to prompt injection via page content. The same UNTRUSTED boundary markers and read-only default permissions apply — a malicious page cannot instruct the worker to send emails or dispatch tasks unless `--allow-writes` was explicitly set.
+- `agent-browser` has its own auth vault with encryption for saved sessions/cookies. This is separate from gobrrr's credential store.
+- The `--content-boundaries` flag wraps page content in markers that signal "this is web content, not instructions."
 
 ## Security
 
@@ -415,6 +471,8 @@ Before routing results to Telegram, the daemon scans for credential-like pattern
 │   │   └── SKILL.md             # Claude instructions for gobrrr gmail
 │   ├── calendar/
 │   │   └── SKILL.md             # Claude instructions for gobrrr gcal
+│   ├── browser/
+│   │   └── SKILL.md             # Claude instructions for agent-browser
 │   └── dispatch/
 │       └── SKILL.md             # Claude instructions for gobrrr submit
 ├── docs/
@@ -476,10 +534,12 @@ Single static binary. No cgo.
 
 1. **Daemon config** — concurrency limit, socket path, workspace path
 2. **Telegram** — bot token and chat ID (encrypted)
-3. **Google accounts** — iterative: add account → OAuth flow → encrypt → repeat
-4. **Default account** — which Google account to use when `--account` is omitted
-5. **Systemd** — optionally install and enable `gobrrr.service`
-6. **Verify** — run `gobrrr daemon status` and `gobrrr gmail list --limit 1` to confirm
+3. **Uptime Kuma** — push URL (optional)
+4. **Google accounts** — iterative: add account → OAuth flow → encrypt → repeat
+5. **Default account** — which Google account to use when `--account` is omitted
+6. **Browser** — install agent-browser + Chrome for Testing (`agent-browser install --with-deps`)
+7. **Systemd** — optionally install and enable `gobrrr.service`
+8. **Verify** — run `gobrrr daemon status` and `gobrrr gmail list --limit 1` to confirm
 
 One-line install:
 ```bash
@@ -502,7 +562,33 @@ The systemd unit uses `Restart=on-failure`, `RestartSec=5`, and `WatchdogSec=60`
 
 ### Health Endpoint
 
-`GET /health` returns daemon status, active worker count, queue depth, and uptime. The existing `healthcheck.sh` can poll this endpoint to report to Uptime Kuma.
+`GET /health` returns daemon status, active worker count, queue depth, and uptime.
+
+### Uptime Kuma Integration
+
+The daemon pushes heartbeats directly to Uptime Kuma (push monitor type) on a configurable interval (default 60s). No external poller needed.
+
+Configuration in `config.json`:
+```json
+{
+  "uptime_kuma": {
+    "push_url": "https://uptime-kuma.example.com/api/push/XXXX",
+    "interval_sec": 60
+  }
+}
+```
+
+The push URL is configured during `gobrrr setup`. Each heartbeat includes:
+- Status: `up` (daemon healthy) or `down` (queue stuck, workers failing)
+- Ping value: current memory usage in MB (same pattern as existing `healthcheck.sh`)
+- Message: active workers / queue depth summary
+
+The daemon considers itself unhealthy (pushes `down`) if:
+- Queue has tasks stuck in `running` longer than 2x their timeout
+- All recent tasks (last 10) have failed
+- Google API auth is broken (refresh token invalid)
+
+If `push_url` is empty or omitted, heartbeats are disabled.
 
 ### Stdout Reply-to Resilience
 
