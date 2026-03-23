@@ -60,6 +60,7 @@ submitted → queued → running → completed | failed
 
 ```json
 {
+  "version": 1,
   "id": "t_1711180800_abc123",
   "prompt": "Check my calendar for today and summarize",
   "status": "queued",
@@ -158,7 +159,7 @@ gobrrr setup google-account --name work
 
 - `telegram` — send result via Telegram bot API
 - `stdout` — CLI blocks until task completes, prints result (for skills/scripts)
-- `file:<path>` — write result to file (restricted to `~/.gobrrr/output/` or `/tmp/gobrrr/` to prevent writes to sensitive paths)
+- `file:<path>` — write result to file. Path is resolved via `filepath.EvalSymlinks` then validated against an allowlist prefix (`~/.gobrrr/output/` or `/tmp/gobrrr/`). This prevents both direct path traversal (`../../.ssh/authorized_keys`) and symlink-based escapes.
 
 ## Worker Execution
 
@@ -206,6 +207,7 @@ OAuth2 with locally managed refresh tokens. No dependency on Claude's account-le
 **accounts.json:**
 ```json
 {
+  "version": 1,
   "default": "personal",
   "accounts": {
     "personal": { "email": "you@gmail.com", "type": "oauth2" },
@@ -340,7 +342,9 @@ Read-only task (default):
 }
 ```
 
-The gobrrr binary checks a `GOBRRR_TASK_MODE` environment variable (set by the daemon: `readonly` or `readwrite`) and rejects write operations (send, create, delete) when in readonly mode, returning a clear error message.
+Write permission is enforced **server-side** in the daemon, not client-side. When the daemon receives a write operation (send, create, delete) over the Unix socket, it checks the originating task's `allow_writes` field in the queue. If the task is read-only, the request is rejected with a clear error. This prevents bypass via environment variable manipulation (e.g., a prompt-injected `GOBRRR_TASK_MODE=readwrite gobrrr gmail send ...`).
+
+Workers are tagged with their task ID via the `GOBRRR_TASK_ID` environment variable, which the CLI includes in all requests to the daemon. The daemon validates this against the queue.
 
 Write-enabled tasks require explicit `--allow-writes` flag at submission.
 
@@ -494,7 +498,7 @@ gobrrr setup
 
 ### Systemd Integration
 
-The systemd unit uses `Restart=on-failure`, `RestartSec=5`, and `WatchdogSec=60`. The daemon sends `sd_notify(WATCHDOG=1)` every 30 seconds via Go's `systemd` notify protocol (pure Go, no cgo — uses `net.Dial("unixgram", ...)` to the `NOTIFY_SOCKET`).
+The systemd unit uses `Restart=on-failure`, `RestartSec=5`, and `WatchdogSec=60`. The daemon sends `sd_notify(WATCHDOG=1)` every 30 seconds via Go's `systemd` notify protocol (pure Go, no cgo — uses `net.Dial("unixgram", ...)` to the `NOTIFY_SOCKET`). The watchdog notification runs on a dedicated goroutine independent of the maintenance loop, so slow queue flushes or API calls don't trigger a false watchdog timeout.
 
 ### Health Endpoint
 
@@ -502,7 +506,7 @@ The systemd unit uses `Restart=on-failure`, `RestartSec=5`, and `WatchdogSec=60`
 
 ### Stdout Reply-to Resilience
 
-If the daemon restarts while a `--reply-to stdout` client is connected, the TCP connection over the Unix socket breaks. The CLI detects this and exits with an error. The task remains in `running` state and is replayed on daemon restart — but the original CLI client is gone, so the result is logged to `~/.gobrrr/logs/<task-id>.log` instead.
+If the daemon restarts while a `--reply-to stdout` client is connected, the Unix socket connection breaks. The CLI detects this, prints `"error: daemon connection lost, result will be in ~/.gobrrr/logs/<task-id>.log"` to stderr, and exits with code 2 (distinguishing from task failure which exits 1, and success which exits 0). The task remains in `running` state and is replayed on daemon restart — the result is written to `~/.gobrrr/logs/<task-id>.log` and routed to Telegram as a fallback.
 
 ### Worker Spawn Rate Limiting
 
@@ -511,6 +515,8 @@ To avoid thundering herd on the Claude Code Max plan rate limiter, the daemon en
 ### Log Rotation
 
 Task logs at `~/.gobrrr/logs/` are pruned automatically. Default retention: 7 days. Configurable via `config.json` as `log_retention_days`. Pruning runs once per hour as part of the daemon's maintenance loop.
+
+Completed and failed tasks in `queue.json` are also pruned on the same schedule and retention window. Only `queued` and `running` tasks are preserved indefinitely.
 
 ## Constraints
 
