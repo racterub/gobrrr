@@ -111,6 +111,10 @@ The daemon exposes an HTTP/1.1 API over the Unix socket (`~/.gobrrr/gobrrr.sock`
 | `POST` | `/tasks/{id}/deny` | Deny a write action |
 | `POST` | `/gmail/{action}` | Gmail operations (list, read, send) |
 | `POST` | `/gcal/{action}` | Calendar operations (today, week, create) |
+| `POST` | `/memory` | Save a new memory |
+| `GET` | `/memory` | List/search memories (query: `q`, `tags`, `limit`) |
+| `GET` | `/memory/{id}` | Get a specific memory |
+| `DELETE` | `/memory/{id}` | Delete a memory |
 | `GET` | `/health` | Daemon health check |
 
 Request/response bodies are JSON. Errors use standard HTTP status codes with a `{"error": "message"}` body.
@@ -264,6 +268,115 @@ After setup, fully headless. The daemon uses the refresh token to get short-live
 - Delete event
 
 All API calls are made by the daemon process, never by workers. Workers call `gobrrr gmail` / `gobrrr gcal` which talks to the daemon over Unix socket.
+
+## Identity
+
+A single `identity.md` file defines who the assistant is. It is injected into every worker's system prompt (via `--system-prompt` or appended to the task prompt). This ensures consistent personality across all tasks — whether dispatched from Telegram, timers, or ad-hoc CLI.
+
+**Location:** `~/.gobrrr/identity.md`
+
+**Default content (created by setup wizard, user-editable):**
+
+```markdown
+# Identity
+
+You are racterub's personal assistant, running on a headless Linux server.
+
+## Language
+- Primary: English
+- Sometimes: Traditional Chinese (when the user writes in it, or when content is in Chinese)
+
+## Tone
+- Casual, concise, no fluff
+- Don't over-explain — summarize first, details on request
+
+## Rules
+- Always summarize first before giving details
+- If the user's prompt is unclear, ask clarification questions directly
+- Your data may be outdated — search online via agent-browser when needed
+- Never expose tokens, secrets, or internal config
+
+## Capabilities
+You have access to: Gmail, Google Calendar, web browsing, and task dispatch.
+Use `gobrrr` CLI commands as documented in your skills.
+```
+
+Workers receive this identity as context. The file is plain markdown — the user can edit it anytime without restarting the daemon.
+
+## Memory
+
+The daemon provides a persistent memory system accessible to all workers via CLI. Memories survive across tasks and sessions, giving the assistant continuity.
+
+### Storage
+
+Memories are stored as individual JSON files in `~/.gobrrr/memory/`, indexed by a central `index.json`:
+
+```
+~/.gobrrr/memory/
+├── index.json                   # Memory index (tags, timestamps, summaries)
+├── m_1711180800_abc.json        # Individual memory entry
+├── m_1711180801_def.json
+└── ...
+```
+
+Each memory entry:
+```json
+{
+  "id": "m_1711180800_abc",
+  "content": "User prefers morning briefings at 8am, not 7am",
+  "tags": ["preference", "schedule"],
+  "created_at": "2026-03-23T12:00:00Z",
+  "updated_at": "2026-03-23T12:00:00Z",
+  "source": "t_1711180800_xyz"
+}
+```
+
+The `index.json` contains summaries and tags for fast search without reading every file. Atomic writes (same pattern as `queue.json`).
+
+### CLI Interface
+
+```bash
+# Save a memory
+gobrrr memory save --content "User prefers morning briefings at 8am" --tags preference,schedule
+
+# Search memories (full-text + tag search)
+gobrrr memory search "morning briefing"
+gobrrr memory search --tags preference
+
+# List recent memories
+gobrrr memory list --limit 20
+
+# Get a specific memory
+gobrrr memory get <memory-id>
+
+# Delete a memory
+gobrrr memory delete <memory-id>
+```
+
+### Protocol Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/memory` | Save a new memory |
+| `GET` | `/memory` | List/search memories (query params: `q`, `tags`, `limit`) |
+| `GET` | `/memory/{id}` | Get a specific memory |
+| `DELETE` | `/memory/{id}` | Delete a memory |
+
+### How Workers Use Memory
+
+Workers call `gobrrr memory` commands through the daemon (same Unix socket pattern as gmail/gcal). A SKILL.md in `skills/memory/` teaches workers when and how to save/retrieve memories:
+
+- **Save** when the user states a preference, makes a decision, or provides context that should persist
+- **Search** at the start of a task to recall relevant context
+- **Don't save** ephemeral task details, code snippets, or information derivable from other sources
+
+### Injection
+
+When a worker starts, the daemon automatically prepends relevant memories to the task prompt. The daemon runs a lightweight tag/keyword match against the prompt to select up to 10 most relevant memories. Workers can also search for more during execution.
+
+### Retention
+
+No automatic pruning — memories persist until explicitly deleted. The user or assistant can clean up stale memories via `gobrrr memory delete`.
 
 ## Browser Integration
 
@@ -451,6 +564,11 @@ Before routing results to Telegram, the daemon scans for credential-like pattern
 │   │   ├── gmail.go             # Gmail API operations
 │   │   ├── calendar.go          # Calendar API operations
 │   │   └── boundary.go          # UNTRUSTED marker wrapping
+│   ├── memory/
+│   │   ├── store.go             # Memory CRUD, index management
+│   │   └── match.go             # Tag/keyword matching for auto-injection
+│   ├── identity/
+│   │   └── identity.go          # Load and inject identity.md into prompts
 │   ├── crypto/
 │   │   └── vault.go             # AES-256-GCM encrypt/decrypt, master key
 │   ├── security/
@@ -473,11 +591,14 @@ Before routing results to Telegram, the daemon scans for credential-like pattern
 │   │   └── SKILL.md             # Claude instructions for gobrrr gcal
 │   ├── browser/
 │   │   └── SKILL.md             # Claude instructions for agent-browser
+│   ├── memory/
+│   │   └── SKILL.md             # Claude instructions for gobrrr memory
 │   └── dispatch/
 │       └── SKILL.md             # Claude instructions for gobrrr submit
 ├── docs/
 │   └── specs/
 │       └── 2026-03-23-gobrrr-design.md  # This document
+├── identity.md.default          # Default identity template (copied during setup)
 ├── go.mod
 ├── go.sum
 ├── CLAUDE.md                    # Dev instructions
@@ -497,6 +618,10 @@ Before routing results to Telegram, the daemon scans for credential-like pattern
 │   ├── accounts.json            # Account registry (no secrets)
 │   └── <account>/
 │       └── credentials.enc     # Encrypted OAuth tokens
+├── identity.md                  # Assistant identity (user-editable)
+├── memory/
+│   ├── index.json               # Memory index (tags, timestamps, summaries)
+│   └── m_*.json                 # Individual memory entries
 ├── logs/
 │   └── <task-id>.log           # Per-task worker output
 ├── workspace/                   # Worker CWD
