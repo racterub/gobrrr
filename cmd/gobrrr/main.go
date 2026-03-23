@@ -1,10 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
 
 	"github.com/spf13/cobra"
+
+	"github.com/racterub/gobrrr/internal/config"
+	"github.com/racterub/gobrrr/internal/daemon"
 )
 
 func main() {
@@ -31,8 +38,35 @@ var daemonCmd = &cobra.Command{
 var daemonStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the gobrrr daemon",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("not implemented")
+	RunE: func(cmd *cobra.Command, args []string) error {
+		gobrrDir := config.GobrrDir()
+		if err := os.MkdirAll(gobrrDir, 0700); err != nil {
+			return fmt.Errorf("creating gobrrr dir: %w", err)
+		}
+
+		cfg, err := config.Load(filepath.Join(gobrrDir, "config.json"))
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+
+		socketPath := cfg.SocketPath
+		if socketPath == "" {
+			socketPath = filepath.Join(gobrrDir, "gobrrr.sock")
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			<-sigs
+			cancel()
+		}()
+
+		fmt.Fprintf(os.Stderr, "gobrrr daemon starting on %s\n", socketPath)
+		d := daemon.New(cfg, socketPath)
+		return d.Run(ctx)
 	},
 }
 
