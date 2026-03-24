@@ -4,10 +4,12 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -21,16 +23,18 @@ import (
 
 // Daemon is the HTTP daemon that serves the gobrrr API over a Unix socket.
 type Daemon struct {
-	cfg        *config.Config
-	socket     string
-	gobrrDir   string
-	mux        *http.ServeMux
-	queue      *Queue
-	workerPool *WorkerPool
-	memStore   *memory.Store
-	accountMgr *google.AccountManager
-	notifier   *telegram.Notifier
-	startTime  time.Time
+	cfg           *config.Config
+	socket        string
+	gobrrDir      string
+	mux           *http.ServeMux
+	queue         *Queue
+	workerPool    *WorkerPool
+	memStore      *memory.Store
+	accountMgr    *google.AccountManager
+	notifier      *telegram.Notifier
+	heartbeat     *Heartbeat
+	healthChecker *HealthChecker
+	startTime     time.Time
 }
 
 // New creates a new Daemon configured to listen on the given socket path.
@@ -69,16 +73,26 @@ func New(cfg *config.Config, socket string) *Daemon {
 		notifier = telegram.NewNotifier(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
 	}
 
+	// Initialize Uptime Kuma heartbeat if configured.
+	heartbeatInterval := time.Duration(cfg.UptimeKuma.IntervalSec) * time.Second
+	if heartbeatInterval <= 0 {
+		heartbeatInterval = 60 * time.Second
+	}
+	hb := NewHeartbeat(cfg.UptimeKuma.PushURL, heartbeatInterval)
+	hc := NewHealthChecker(q)
+
 	d := &Daemon{
-		cfg:        cfg,
-		socket:     socket,
-		gobrrDir:   gobrrDir,
-		mux:        http.NewServeMux(),
-		queue:      q,
-		workerPool: wp,
-		memStore:   ms,
-		accountMgr: acctMgr,
-		notifier:   notifier,
+		cfg:           cfg,
+		socket:        socket,
+		gobrrDir:      gobrrDir,
+		mux:           http.NewServeMux(),
+		queue:         q,
+		workerPool:    wp,
+		memStore:      ms,
+		accountMgr:    acctMgr,
+		notifier:      notifier,
+		heartbeat:     hb,
+		healthChecker: hc,
 	}
 
 	// Wire result routing callback into the worker pool.
@@ -116,6 +130,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Start the worker pool in the background.
 	go d.workerPool.Run(ctx)
 
+	// Start Uptime Kuma heartbeat (no-op if pushURL is empty).
+	go d.heartbeat.Run(ctx)
+
+	// Start health monitoring loop that updates heartbeat status every 30 seconds.
+	go d.runHealthMonitor(ctx)
+
 	// Remove any stale socket file before binding.
 	_ = os.Remove(d.socket)
 
@@ -144,6 +164,52 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// runHealthMonitor runs a loop that checks system health every 30 seconds and
+// updates the heartbeat with the current status and memory usage.
+func (d *Daemon) runHealthMonitor(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.updateHeartbeat()
+		}
+	}
+}
+
+// updateHeartbeat checks health and memory usage then calls heartbeat.Update.
+func (d *Daemon) updateHeartbeat() {
+	healthy, reason := d.healthChecker.Check()
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	memMB := int(m.Sys / 1024 / 1024)
+
+	status := "up"
+	msg := ""
+	if !healthy {
+		status = "down"
+		msg = reason
+	} else {
+		active := d.queue.List(false)
+		running := 0
+		queued := 0
+		for _, t := range active {
+			if t.Status == "running" {
+				running++
+			} else if t.Status == "queued" {
+				queued++
+			}
+		}
+		msg = fmt.Sprintf("%d workers active, %d queued", running, queued)
+	}
+
+	d.heartbeat.Update(status, memMB, msg)
 }
 
 // healthResponse is the JSON body returned by GET /health.
