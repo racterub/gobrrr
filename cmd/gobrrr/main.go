@@ -503,10 +503,14 @@ var (
 )
 
 var memorySearchCmd = &cobra.Command{
-	Use:   "search <query>",
+	Use:   "search [query]",
 	Short: "Search memory entries",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		query := ""
+		if len(args) > 0 {
+			query = args[0]
+		}
 		var tags []string
 		if memorySearchTags != "" {
 			for _, t := range strings.Split(memorySearchTags, ",") {
@@ -517,7 +521,7 @@ var memorySearchCmd = &cobra.Command{
 			}
 		}
 		c := newClient()
-		entries, err := c.SearchMemory(args[0], tags, 0)
+		entries, err := c.SearchMemory(query, tags, 0)
 		if err != nil {
 			return err
 		}
