@@ -212,18 +212,30 @@ var logsCmd = &cobra.Command{
 // --- approve / deny / gmail / gcal / memory / setup (stubs) ---
 
 var approveCmd = &cobra.Command{
-	Use:   "approve",
-	Short: "Approve a pending task",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("not implemented")
+	Use:   "approve <task-id>",
+	Short: "Approve a pending confirmation for a task",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		if err := c.ApproveTask(args[0]); err != nil {
+			return err
+		}
+		fmt.Printf("Task %s approved.\n", args[0])
+		return nil
 	},
 }
 
 var denyCmd = &cobra.Command{
-	Use:   "deny",
-	Short: "Deny a pending task",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("not implemented")
+	Use:   "deny <task-id>",
+	Short: "Deny a pending confirmation for a task",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		if err := c.DenyTask(args[0]); err != nil {
+			return err
+		}
+		fmt.Printf("Task %s denied.\n", args[0])
+		return nil
 	},
 }
 
