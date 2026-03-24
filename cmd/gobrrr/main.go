@@ -15,6 +15,7 @@ import (
 	"github.com/racterub/gobrrr/internal/config"
 	"github.com/racterub/gobrrr/internal/daemon"
 	"github.com/racterub/gobrrr/internal/memory"
+	"github.com/racterub/gobrrr/internal/setup"
 )
 
 func main() {
@@ -572,9 +573,19 @@ var memoryDeleteCmd = &cobra.Command{
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Run first-time setup",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("not implemented")
+	Short: "Run first-time setup wizard",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return setup.RunWizard()
+	},
+}
+
+var setupGoogleAccountName string
+
+var setupGoogleAccountCmd = &cobra.Command{
+	Use:   "google-account",
+	Short: "Add a Google account",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return setup.RunGoogleAccountSetup(setupGoogleAccountName)
 	},
 }
 
@@ -647,6 +658,9 @@ func init() {
 	gcalCmd.AddCommand(gcalCreateCmd)
 	gcalCmd.AddCommand(gcalUpdateCmd)
 	gcalCmd.AddCommand(gcalDeleteCmd)
+
+	setupGoogleAccountCmd.Flags().StringVar(&setupGoogleAccountName, "name", "", "Account label (e.g. personal, work)")
+	setupCmd.AddCommand(setupGoogleAccountCmd)
 
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(submitCmd)
