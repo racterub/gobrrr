@@ -144,6 +144,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Start health monitoring loop that updates heartbeat status every 30 seconds.
 	go d.runHealthMonitor(ctx)
 
+	// Start hourly maintenance loop for log and queue pruning.
+	go d.runMaintenance(ctx)
+
 	// Remove any stale socket file before binding.
 	_ = os.Remove(d.socket)
 
