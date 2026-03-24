@@ -1,0 +1,20 @@
+[Unit]
+Description=gobrrr Task Dispatch Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=%h/.local/bin/gobrrr daemon start
+Restart=on-failure
+RestartSec=5
+WatchdogSec=60
+MemoryMax=512M
+KillMode=control-group
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gobrrr
+
+[Install]
+WantedBy=default.target

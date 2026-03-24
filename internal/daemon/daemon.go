@@ -132,6 +132,9 @@ func New(cfg *config.Config, socket string) *Daemon {
 func (d *Daemon) Run(ctx context.Context) error {
 	d.startTime = time.Now()
 
+	// Start systemd watchdog (no-op if NOTIFY_SOCKET is not set).
+	go StartWatchdog(ctx)
+
 	// Start the worker pool in the background.
 	go d.workerPool.Run(ctx)
 
