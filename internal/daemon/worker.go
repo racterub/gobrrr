@@ -14,6 +14,7 @@ import (
 
 	"github.com/racterub/gobrrr/internal/identity"
 	"github.com/racterub/gobrrr/internal/memory"
+	"github.com/racterub/gobrrr/internal/security"
 )
 
 // ErrTimeout is returned by runWorker when the worker process exceeds its timeout.
@@ -153,6 +154,7 @@ func NewWorkerPool(queue *Queue, maxWorkers int, spawnInterval time.Duration, go
 
 // defaultBuildCommand builds the WorkerConfig for a task using the claude CLI.
 // It loads the identity file and relevant memories to build a full prompt.
+// It also generates a per-task settings.json to enforce permissions.
 func (wp *WorkerPool) defaultBuildCommand(task *Task) *WorkerConfig {
 	logDir := filepath.Join(wp.gobrrDir, "logs")
 	logPath := filepath.Join(logDir, task.ID+".log")
@@ -164,9 +166,13 @@ func (wp *WorkerPool) defaultBuildCommand(task *Task) *WorkerConfig {
 		"--print",
 		"--output-format", "text",
 	}
-	if !task.AllowWrites {
-		args = append(args, "--allowedTools", "Read,Glob,Grep,Bash")
+
+	// Generate per-task settings.json for permission sandboxing.
+	workersDir := filepath.Join(wp.gobrrDir, "workers")
+	if settingsPath, err := security.Generate(workersDir, task.ID, task.AllowWrites); err == nil {
+		args = append(args, "--settings-file", settingsPath)
 	}
+
 	args = append(args, prompt)
 
 	return &WorkerConfig{
@@ -238,6 +244,9 @@ func (wp *WorkerPool) Run(ctx context.Context) {
 						wp.mu.Lock()
 						wp.active--
 						wp.mu.Unlock()
+						// Clean up per-task settings directory.
+						workersDir := filepath.Join(wp.gobrrDir, "workers")
+						_ = security.Cleanup(workersDir, t.ID) //nolint:errcheck
 					}()
 
 					cfg := wp.buildCommand(t)
