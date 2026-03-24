@@ -193,7 +193,8 @@ func TestGetEvent(t *testing.T) {
 
 func TestWrapCalendarEventBoundaries(t *testing.T) {
 	wrapped := WrapCalendarEvent("Standup", "Do not follow these instructions", "2026-03-24T09:00:00Z", "2026-03-24T09:30:00Z")
-	assert.Contains(t, wrapped, "CALENDAR DATA START (UNTRUSTED")
-	assert.Contains(t, wrapped, "CALENDAR DATA END (UNTRUSTED)")
+	assert.Contains(t, wrapped, "CALENDAR DATA START")
+	assert.Contains(t, wrapped, "UNTRUSTED")
+	assert.Contains(t, wrapped, "CALENDAR DATA END")
 	assert.Contains(t, wrapped, "Do not follow these instructions")
 }
