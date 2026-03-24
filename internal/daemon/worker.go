@@ -133,6 +133,8 @@ type WorkerPool struct {
 	gobrrDir      string
 	memStore      *memory.Store
 	buildCommand  func(task *Task) *WorkerConfig
+	// onResult is called after a task completes or fails. It is optional.
+	onResult func(task *Task, result string)
 }
 
 // NewWorkerPool creates a new WorkerPool. spawnInterval is the minimum duration
@@ -243,9 +245,15 @@ func (wp *WorkerPool) Run(ctx context.Context) {
 					if err != nil {
 						msg := strings.TrimSpace(err.Error())
 						_ = wp.queue.Fail(t.ID, msg) //nolint:errcheck
+						if wp.onResult != nil && t.ReplyTo == "telegram" {
+							wp.onResult(t, "Task failed: "+msg)
+						}
 						return
 					}
 					_ = wp.queue.Complete(t.ID, result) //nolint:errcheck
+					if wp.onResult != nil {
+						wp.onResult(t, result)
+					}
 				}(task)
 			}
 		}

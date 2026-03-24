@@ -16,6 +16,7 @@ import (
 	vault "github.com/racterub/gobrrr/internal/crypto"
 	"github.com/racterub/gobrrr/internal/google"
 	"github.com/racterub/gobrrr/internal/memory"
+	"github.com/racterub/gobrrr/internal/telegram"
 )
 
 // Daemon is the HTTP daemon that serves the gobrrr API over a Unix socket.
@@ -28,6 +29,7 @@ type Daemon struct {
 	workerPool *WorkerPool
 	memStore   *memory.Store
 	accountMgr *google.AccountManager
+	notifier   *telegram.Notifier
 	startTime  time.Time
 }
 
@@ -61,6 +63,12 @@ func New(cfg *config.Config, socket string) *Daemon {
 		}
 	}
 
+	// Initialize Telegram notifier if bot token and chat ID are configured.
+	var notifier *telegram.Notifier
+	if cfg.Telegram.BotToken != "" && cfg.Telegram.ChatID != "" {
+		notifier = telegram.NewNotifier(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
+	}
+
 	d := &Daemon{
 		cfg:        cfg,
 		socket:     socket,
@@ -70,6 +78,12 @@ func New(cfg *config.Config, socket string) *Daemon {
 		workerPool: wp,
 		memStore:   ms,
 		accountMgr: acctMgr,
+		notifier:   notifier,
+	}
+
+	// Wire result routing callback into the worker pool.
+	wp.onResult = func(task *Task, result string) {
+		_ = d.routeResult(task, result) //nolint:errcheck
 	}
 	d.mux.HandleFunc("/health", d.handleHealth)
 	d.mux.HandleFunc("POST /tasks", d.handleSubmitTask)

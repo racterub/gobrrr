@@ -112,6 +112,24 @@ var submitCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
+		// When reply-to is stdout, block until the task completes and print
+		// the result to stdout (or error to stderr with non-zero exit).
+		if submitReplyTo == "stdout" {
+			result, waitErr := c.WaitForTask(task.ID)
+			if waitErr != nil {
+				// Connection loss: exit 2; task failure: exit 1.
+				if strings.Contains(waitErr.Error(), "daemon connection lost") {
+					fmt.Fprintln(os.Stderr, waitErr.Error())
+					os.Exit(2)
+				}
+				fmt.Fprintln(os.Stderr, waitErr.Error())
+				os.Exit(1)
+			}
+			fmt.Print(result)
+			return nil
+		}
+
 		printTask(task)
 		return nil
 	},

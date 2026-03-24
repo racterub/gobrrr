@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/racterub/gobrrr/internal/daemon"
 	"github.com/racterub/gobrrr/internal/memory"
@@ -691,6 +692,35 @@ func (c *Client) GcalDeleteEventWithTaskID(eventID, account, taskID string) erro
 		return fmt.Errorf("unexpected status %d from POST /gcal/delete", resp.StatusCode)
 	}
 	return nil
+}
+
+// WaitForTask polls GetTask every 2 seconds until the task reaches a terminal
+// state (completed, failed, or cancelled). It returns the result string on
+// success, an error on failure/cancellation, or a descriptive error if the
+// daemon connection is lost.
+func (c *Client) WaitForTask(taskID string) (string, error) {
+	for {
+		task, err := c.GetTask(taskID)
+		if err != nil {
+			return "", fmt.Errorf("daemon connection lost, result will be in ~/.gobrrr/logs/%s.log", taskID)
+		}
+		switch task.Status {
+		case "completed":
+			if task.Result != nil {
+				return *task.Result, nil
+			}
+			return "", nil
+		case "failed":
+			errMsg := "unknown error"
+			if task.Error != nil {
+				errMsg = *task.Error
+			}
+			return "", fmt.Errorf("task failed: %s", errMsg)
+		case "cancelled":
+			return "", fmt.Errorf("task was cancelled")
+		}
+		time.Sleep(2 * time.Second)
+	}
 }
 
 // Health returns the daemon health information.
