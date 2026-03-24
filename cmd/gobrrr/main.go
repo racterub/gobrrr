@@ -310,8 +310,121 @@ var gmailReplyCmd = &cobra.Command{
 var gcalCmd = &cobra.Command{
 	Use:   "gcal",
 	Short: "Google Calendar integration",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("not implemented")
+}
+
+// gcal today flags
+var gcalTodayAccount string
+
+var gcalTodayCmd = &cobra.Command{
+	Use:   "today",
+	Short: "List today's calendar events",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		result, err := c.GcalTodayWithTaskID(gcalTodayAccount, os.Getenv("GOBRRR_TASK_ID"))
+		if err != nil {
+			return err
+		}
+		fmt.Print(result)
+		return nil
+	},
+}
+
+// gcal week flags
+var gcalWeekAccount string
+
+var gcalWeekCmd = &cobra.Command{
+	Use:   "week",
+	Short: "List this week's calendar events",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		result, err := c.GcalWeekWithTaskID(gcalWeekAccount, os.Getenv("GOBRRR_TASK_ID"))
+		if err != nil {
+			return err
+		}
+		fmt.Print(result)
+		return nil
+	},
+}
+
+// gcal get flags
+var gcalGetAccount string
+
+var gcalGetCmd = &cobra.Command{
+	Use:   "get <event-id>",
+	Short: "Get a calendar event by ID",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		result, err := c.GcalGetEventWithTaskID(args[0], gcalGetAccount, os.Getenv("GOBRRR_TASK_ID"))
+		if err != nil {
+			return err
+		}
+		fmt.Print(result)
+		return nil
+	},
+}
+
+// gcal create flags
+var (
+	gcalCreateTitle       string
+	gcalCreateStart       string
+	gcalCreateEnd         string
+	gcalCreateDescription string
+	gcalCreateAccount     string
+)
+
+var gcalCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a calendar event",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if gcalCreateTitle == "" {
+			return fmt.Errorf("--title is required")
+		}
+		c := newClient()
+		if err := c.GcalCreateEventWithTaskID(gcalCreateTitle, gcalCreateStart, gcalCreateEnd, gcalCreateDescription, gcalCreateAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
+			return err
+		}
+		fmt.Println("Event created.")
+		return nil
+	},
+}
+
+// gcal update flags
+var (
+	gcalUpdateTitle   string
+	gcalUpdateStart   string
+	gcalUpdateEnd     string
+	gcalUpdateAccount string
+)
+
+var gcalUpdateCmd = &cobra.Command{
+	Use:   "update <event-id>",
+	Short: "Update a calendar event",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		if err := c.GcalUpdateEventWithTaskID(args[0], gcalUpdateTitle, gcalUpdateStart, gcalUpdateEnd, gcalUpdateAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
+			return err
+		}
+		fmt.Println("Event updated.")
+		return nil
+	},
+}
+
+// gcal delete flags
+var gcalDeleteAccount string
+
+var gcalDeleteCmd = &cobra.Command{
+	Use:   "delete <event-id>",
+	Short: "Delete a calendar event",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		if err := c.GcalDeleteEventWithTaskID(args[0], gcalDeleteAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
+			return err
+		}
+		fmt.Printf("Event %s deleted.\n", args[0])
+		return nil
 	},
 }
 
@@ -480,6 +593,30 @@ func init() {
 	gmailCmd.AddCommand(gmailReadCmd)
 	gmailCmd.AddCommand(gmailSendCmd)
 	gmailCmd.AddCommand(gmailReplyCmd)
+
+	gcalTodayCmd.Flags().StringVar(&gcalTodayAccount, "account", "default", "Account name")
+	gcalWeekCmd.Flags().StringVar(&gcalWeekAccount, "account", "default", "Account name")
+	gcalGetCmd.Flags().StringVar(&gcalGetAccount, "account", "default", "Account name")
+
+	gcalCreateCmd.Flags().StringVar(&gcalCreateTitle, "title", "", "Event title (required)")
+	gcalCreateCmd.Flags().StringVar(&gcalCreateStart, "start", "", "Event start time (RFC3339)")
+	gcalCreateCmd.Flags().StringVar(&gcalCreateEnd, "end", "", "Event end time (RFC3339)")
+	gcalCreateCmd.Flags().StringVar(&gcalCreateDescription, "description", "", "Event description")
+	gcalCreateCmd.Flags().StringVar(&gcalCreateAccount, "account", "default", "Account name")
+
+	gcalUpdateCmd.Flags().StringVar(&gcalUpdateTitle, "title", "", "New event title")
+	gcalUpdateCmd.Flags().StringVar(&gcalUpdateStart, "start", "", "New event start time (RFC3339)")
+	gcalUpdateCmd.Flags().StringVar(&gcalUpdateEnd, "end", "", "New event end time (RFC3339)")
+	gcalUpdateCmd.Flags().StringVar(&gcalUpdateAccount, "account", "default", "Account name")
+
+	gcalDeleteCmd.Flags().StringVar(&gcalDeleteAccount, "account", "default", "Account name")
+
+	gcalCmd.AddCommand(gcalTodayCmd)
+	gcalCmd.AddCommand(gcalWeekCmd)
+	gcalCmd.AddCommand(gcalGetCmd)
+	gcalCmd.AddCommand(gcalCreateCmd)
+	gcalCmd.AddCommand(gcalUpdateCmd)
+	gcalCmd.AddCommand(gcalDeleteCmd)
 
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(submitCmd)

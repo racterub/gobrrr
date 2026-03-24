@@ -446,6 +446,253 @@ func (c *Client) GmailReplyWithTaskID(messageID, body, account, taskID string) e
 	return nil
 }
 
+// --- Calendar methods ---
+
+// gcalAccountRequest mirrors the daemon's gcal endpoints that only need account.
+type gcalAccountRequest struct {
+	Account string `json:"account"`
+}
+
+// gcalGetRequest mirrors the daemon's POST /gcal/get body.
+type gcalGetRequest struct {
+	EventID string `json:"event_id"`
+	Account string `json:"account"`
+}
+
+// gcalCreateRequest mirrors the daemon's POST /gcal/create body.
+type gcalCreateRequest struct {
+	Title       string `json:"title"`
+	Start       string `json:"start"`
+	End         string `json:"end"`
+	Description string `json:"description"`
+	Account     string `json:"account"`
+}
+
+// gcalUpdateRequest mirrors the daemon's POST /gcal/update body.
+type gcalUpdateRequest struct {
+	EventID string `json:"event_id"`
+	Title   string `json:"title"`
+	Start   string `json:"start"`
+	End     string `json:"end"`
+	Account string `json:"account"`
+}
+
+// gcalDeleteRequest mirrors the daemon's POST /gcal/delete body.
+type gcalDeleteRequest struct {
+	EventID string `json:"event_id"`
+	Account string `json:"account"`
+}
+
+// GcalToday fetches today's calendar events for the given account.
+// It returns the raw JSON response body as a string.
+func (c *Client) GcalToday(account string) (string, error) {
+	return c.GcalTodayWithTaskID(account, "")
+}
+
+// GcalTodayWithTaskID is like GcalToday but attaches an X-Gobrrr-Task-ID header.
+func (c *Client) GcalTodayWithTaskID(account, taskID string) (string, error) {
+	body := gcalAccountRequest{Account: account}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("marshalling request: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/gcal/today", bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if taskID != "" {
+		req.Header.Set("X-Gobrrr-Task-ID", taskID)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("POST /gcal/today: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %d from POST /gcal/today", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("reading response: %w", err)
+	}
+	return string(raw), nil
+}
+
+// GcalWeek fetches this week's calendar events for the given account.
+// It returns the raw JSON response body as a string.
+func (c *Client) GcalWeek(account string) (string, error) {
+	return c.GcalWeekWithTaskID(account, "")
+}
+
+// GcalWeekWithTaskID is like GcalWeek but attaches an X-Gobrrr-Task-ID header.
+func (c *Client) GcalWeekWithTaskID(account, taskID string) (string, error) {
+	body := gcalAccountRequest{Account: account}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("marshalling request: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/gcal/week", bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if taskID != "" {
+		req.Header.Set("X-Gobrrr-Task-ID", taskID)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("POST /gcal/week: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %d from POST /gcal/week", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("reading response: %w", err)
+	}
+	return string(raw), nil
+}
+
+// GcalGetEvent fetches a single calendar event by ID for the given account.
+// It returns the raw JSON response body as a string.
+func (c *Client) GcalGetEvent(eventID, account string) (string, error) {
+	return c.GcalGetEventWithTaskID(eventID, account, "")
+}
+
+// GcalGetEventWithTaskID is like GcalGetEvent but attaches an X-Gobrrr-Task-ID header.
+func (c *Client) GcalGetEventWithTaskID(eventID, account, taskID string) (string, error) {
+	body := gcalGetRequest{EventID: eventID, Account: account}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("marshalling request: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/gcal/get", bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if taskID != "" {
+		req.Header.Set("X-Gobrrr-Task-ID", taskID)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("POST /gcal/get: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %d from POST /gcal/get", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("reading response: %w", err)
+	}
+	return string(raw), nil
+}
+
+// GcalCreateEvent creates a new calendar event via the daemon.
+func (c *Client) GcalCreateEvent(title, start, end, description, account string) error {
+	return c.GcalCreateEventWithTaskID(title, start, end, description, account, "")
+}
+
+// GcalCreateEventWithTaskID is like GcalCreateEvent but attaches an X-Gobrrr-Task-ID header.
+func (c *Client) GcalCreateEventWithTaskID(title, start, end, description, account, taskID string) error {
+	reqBody := gcalCreateRequest{Title: title, Start: start, End: end, Description: description, Account: account}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshalling request: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/gcal/create", bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if taskID != "" {
+		req.Header.Set("X-Gobrrr-Task-ID", taskID)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST /gcal/create: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("write not permitted: task does not have allow_writes")
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status %d from POST /gcal/create", resp.StatusCode)
+	}
+	return nil
+}
+
+// GcalUpdateEvent updates an existing calendar event via the daemon.
+func (c *Client) GcalUpdateEvent(eventID, title, start, end, account string) error {
+	return c.GcalUpdateEventWithTaskID(eventID, title, start, end, account, "")
+}
+
+// GcalUpdateEventWithTaskID is like GcalUpdateEvent but attaches an X-Gobrrr-Task-ID header.
+func (c *Client) GcalUpdateEventWithTaskID(eventID, title, start, end, account, taskID string) error {
+	reqBody := gcalUpdateRequest{EventID: eventID, Title: title, Start: start, End: end, Account: account}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshalling request: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/gcal/update", bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if taskID != "" {
+		req.Header.Set("X-Gobrrr-Task-ID", taskID)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST /gcal/update: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("write not permitted: task does not have allow_writes")
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status %d from POST /gcal/update", resp.StatusCode)
+	}
+	return nil
+}
+
+// GcalDeleteEvent deletes a calendar event via the daemon.
+func (c *Client) GcalDeleteEvent(eventID, account string) error {
+	return c.GcalDeleteEventWithTaskID(eventID, account, "")
+}
+
+// GcalDeleteEventWithTaskID is like GcalDeleteEvent but attaches an X-Gobrrr-Task-ID header.
+func (c *Client) GcalDeleteEventWithTaskID(eventID, account, taskID string) error {
+	reqBody := gcalDeleteRequest{EventID: eventID, Account: account}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshalling request: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/gcal/delete", bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if taskID != "" {
+		req.Header.Set("X-Gobrrr-Task-ID", taskID)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST /gcal/delete: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("write not permitted: task does not have allow_writes")
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status %d from POST /gcal/delete", resp.StatusCode)
+	}
+	return nil
+}
+
 // Health returns the daemon health information.
 func (c *Client) Health() (map[string]interface{}, error) {
 	resp, err := c.httpClient.Get(c.baseURL + "/health")
