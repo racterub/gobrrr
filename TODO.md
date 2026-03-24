@@ -39,3 +39,25 @@ Task submitted
 - Must handle worker crashes gracefully
 - Memory budget: each warm Claude session uses ~200-400MB
 - On 4CPU/8GB LXC, max 1-2 warm workers realistically
+
+## Migrate Assistant into gobrrr
+
+The assistant currently lives in `~/github/dotfiles/assistant/` as a separate system. It should be migrated into this repo so gobrrr is fully self-contained.
+
+### What to migrate
+
+- `session-wrapper.sh` — Claude Telegram channel session lifecycle, rotation, crash recovery
+- `manage-timer.sh` — Systemd timer CRUD for scheduled tasks
+- `run-timer-task.sh` — Timer task execution (already calls gobrrr)
+- `send-telegram.sh` — Telegram Bot API helper
+- `check-permission.sh` — Permission self-check helper
+- `healthcheck.sh` — Health monitoring with Uptime Kuma (partially replaced by gobrrr heartbeat)
+- `config.env` — Secrets and thresholds
+- `settings.json` — Claude Code permissions for the main session
+- `systemd/claude-channels.service` — Main session systemd unit
+- `skills/` — Timer management, homelab skills
+- `CLAUDE.md` — Assistant runtime instructions
+
+### Goal
+
+Single repo, single `gobrrr setup` installs everything: the daemon, the Telegram session wrapper, timers, skills, and systemd units. No cross-repo symlinks.
