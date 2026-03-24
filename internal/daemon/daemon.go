@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -100,7 +101,15 @@ func New(cfg *config.Config, socket string) *Daemon {
 
 	// Wire result routing callback into the worker pool.
 	wp.onResult = func(task *Task, result string) {
-		_ = d.routeResult(task, result) //nolint:errcheck
+		if err := d.routeResult(task, result); err != nil {
+			log.Printf("routing error for task %s: %v", task.ID, err)
+			// Write routing error to task log so user can debug
+			logPath := filepath.Join(gobrrDir, "logs", task.ID+".log")
+			if f, ferr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); ferr == nil {
+				fmt.Fprintf(f, "\n--- ROUTING ERROR ---\n%v\n", err)
+				f.Close()
+			}
+		}
 	}
 	d.mux.HandleFunc("/health", d.handleHealth)
 	d.mux.HandleFunc("POST /tasks", d.handleSubmitTask)
