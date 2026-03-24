@@ -133,3 +133,57 @@ func TestRouteUnknownReplyTo(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown reply_to")
 }
+
+func TestRouteToTelegramQuarantinesLeak(t *testing.T) {
+	var received string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Capture the raw request body text so we can verify the warning message.
+		buf := make([]byte, 4096)
+		n, _ := r.Body.Read(buf)
+		received = string(buf[:n])
+		w.Write([]byte(`{"ok":true}`)) //nolint:errcheck
+	}))
+	defer server.Close()
+
+	notifier := telegram.NewNotifier("123:TOKEN", "chat123", telegram.WithBaseURL(server.URL))
+	d := newTestDaemon(t, notifier)
+	task := &Task{ID: "t_leak", ReplyTo: "telegram", Status: "completed"}
+
+	// A result containing a Bearer token — should be quarantined.
+	leakyResult := "Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.long.token"
+	err := d.routeResult(task, leakyResult)
+	require.NoError(t, err)
+
+	// The telegram message must be the warning, not the leaked content.
+	assert.Contains(t, received, "quarantined")
+	assert.NotContains(t, received, "eyJhbGciOi")
+
+	// The quarantined result must have been written to the task log.
+	logPath := filepath.Join(d.gobrrDir, "logs", "t_leak.log")
+	logData, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(logData), "QUARANTINED RESULT")
+	assert.Contains(t, string(logData), leakyResult)
+}
+
+func TestRouteToTelegramCleanOutputNotQuarantined(t *testing.T) {
+	var received string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 4096)
+		n, _ := r.Body.Read(buf)
+		received = string(buf[:n])
+		w.Write([]byte(`{"ok":true}`)) //nolint:errcheck
+	}))
+	defer server.Close()
+
+	notifier := telegram.NewNotifier("123:TOKEN", "chat123", telegram.WithBaseURL(server.URL))
+	d := newTestDaemon(t, notifier)
+	task := &Task{ID: "t_clean", ReplyTo: "telegram", Status: "completed"}
+
+	cleanResult := "You have 3 meetings today. The standup is at 10am."
+	err := d.routeResult(task, cleanResult)
+	require.NoError(t, err)
+
+	assert.Contains(t, received, "3 meetings today")
+	assert.NotContains(t, received, "quarantined")
+}

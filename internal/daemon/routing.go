@@ -1,21 +1,33 @@
 package daemon
 
 import (
+	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/racterub/gobrrr/internal/config"
+	vault "github.com/racterub/gobrrr/internal/crypto"
+	"github.com/racterub/gobrrr/internal/security"
 )
 
 // routeResult delivers the result of a completed task to its designated
-// reply_to destination.
+// reply_to destination. Before sending to telegram, the result is scanned for
+// potential credential leaks. If a leak is detected, the result is quarantined
+// to the task log and a warning is sent instead.
 func (d *Daemon) routeResult(task *Task, result string) error {
 	switch {
 	case task.ReplyTo == "telegram":
 		if d.notifier == nil {
 			return fmt.Errorf("telegram not configured")
+		}
+		scan := security.Check(result, d.knownSecrets())
+		if scan.HasLeak {
+			d.quarantineResult(task, result, scan.Matches)
+			return d.notifier.Send("\u26a0\ufe0f Task result contained potential credential leak and was quarantined. Check logs.")
 		}
 		return d.notifier.Send(result)
 	case task.ReplyTo == "stdout":
@@ -30,6 +42,39 @@ func (d *Daemon) routeResult(task *Task, result string) error {
 		}
 		return fmt.Errorf("unknown reply_to: %s", task.ReplyTo)
 	}
+}
+
+// knownSecrets returns a list of sensitive values that should never appear in
+// task output. Currently includes the master key encoded as hex, which is the
+// form it would appear if accidentally logged.
+func (d *Daemon) knownSecrets() []string {
+	key, err := vault.LoadMasterKey(d.gobrrDir)
+	if err != nil {
+		return nil
+	}
+	return []string{hex.EncodeToString(key[:])}
+}
+
+// quarantineResult appends the original result to the task's log file with a
+// quarantine notice, and logs the leak matches.
+func (d *Daemon) quarantineResult(task *Task, result string, matches []string) {
+	logDir := filepath.Join(d.gobrrDir, "logs")
+	if err := os.MkdirAll(logDir, 0700); err != nil {
+		log.Printf("quarantine: failed to create log dir: %v", err)
+		return
+	}
+	logPath := filepath.Join(logDir, task.ID+".log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		log.Printf("quarantine: failed to open log file %s: %v", logPath, err)
+		return
+	}
+	defer f.Close()
+
+	fmt.Fprintf(f, "\n--- QUARANTINED RESULT [%s] ---\n", time.Now().UTC().Format(time.RFC3339))
+	fmt.Fprintf(f, "Credential leak patterns detected: %s\n", strings.Join(matches, "; "))
+	fmt.Fprintf(f, "--- BEGIN QUARANTINED OUTPUT ---\n%s\n--- END QUARANTINED OUTPUT ---\n", result)
+	log.Printf("quarantine: task %s result quarantined due to potential credential leak (%d patterns)", task.ID, len(matches))
 }
 
 // writeFileResult writes result to the given path after validating it lies
