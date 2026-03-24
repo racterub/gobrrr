@@ -62,6 +62,34 @@ The assistant currently lives in `~/github/dotfiles/assistant/` as a separate sy
 
 Single repo, single `gobrrr setup` installs everything: the daemon, the Telegram session wrapper, timers, skills, and systemd units. No cross-repo symlinks.
 
+## One-Command Install Script
+
+`scripts/setup.sh` exists but only builds and runs `gobrrr setup`. Need a full `install.sh` that handles everything end-to-end on a fresh machine.
+
+### What it should do
+
+1. **Install dependencies**
+   - Go (if not present — download from go.dev or check version)
+   - agent-browser + Chrome for Testing (`agent-browser install --with-deps`)
+   - jq, curl (if not present)
+2. **Clone/update repo** to `~/github/gobrrr`
+3. **Build** `CGO_ENABLED=0 go build -o ~/.local/bin/gobrrr ./cmd/gobrrr/`
+4. **Run `gobrrr setup`** — interactive wizard (master key, Telegram, Google accounts, etc.)
+5. **Install systemd units**
+   - Copy `systemd/gobrrr.service` to `~/.config/systemd/user/`
+   - `systemctl --user daemon-reload`
+   - `systemctl --user enable gobrrr`
+   - `loginctl enable-linger $USER` (if not already)
+6. **Start the service** — `systemctl --user start gobrrr`
+7. **Verify** — `gobrrr daemon status`
+
+### Notes
+
+- Should be idempotent (safe to run multiple times)
+- Should detect existing installation and offer upgrade vs fresh install
+- Should check prerequisites before starting (arch, OS, systemd user session)
+- Single command: `curl -fsSL .../install.sh | bash` or `./install.sh`
+
 ## Async Dispatch with Result Context
 
 ### Problem
