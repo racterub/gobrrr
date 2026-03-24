@@ -759,7 +759,7 @@ func (c *Client) WaitForTask(taskID string) (string, error) {
 		case "cancelled":
 			return "", fmt.Errorf("task was cancelled")
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 

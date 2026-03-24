@@ -170,7 +170,7 @@ func (wp *WorkerPool) defaultBuildCommand(task *Task) *WorkerConfig {
 	// Generate per-task settings.json for permission sandboxing.
 	workersDir := filepath.Join(wp.gobrrDir, "workers")
 	if settingsPath, err := security.Generate(workersDir, task.ID, task.AllowWrites); err == nil {
-		args = append(args, "--settings-file", settingsPath)
+		args = append(args, "--settings", settingsPath)
 	}
 
 	args = append(args, prompt)
@@ -209,7 +209,7 @@ func (wp *WorkerPool) buildFullPrompt(taskPrompt string) string {
 // Run starts the worker pool loop, ticking every second to check for available
 // tasks and spawn workers up to maxWorkers. It blocks until ctx is cancelled.
 func (wp *WorkerPool) Run(ctx context.Context) {
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {

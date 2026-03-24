@@ -1,0 +1,41 @@
+# TODO
+
+## Warm Worker Pool
+
+Currently each task spawns a cold `claude --print` process (~7-12s startup). A warm worker pool would keep Claude sessions alive and route tasks to them, reducing dispatch latency to sub-second for simple tasks.
+
+### Design
+
+Maintain N idle Claude processes (default 1) running in `--input-format stream-json --output-format stream-json` mode. Tasks are piped in via stdin, results read from stdout. Sessions stay alive between tasks.
+
+### Key decisions needed
+
+- **Session mode**: `claude` supports `--input-format stream-json` for persistent stdin/stdout sessions. Verify this works for sequential task execution without state leaking between tasks.
+- **Identity reset**: Each task needs fresh identity + memory injection. Can we send a system prompt per-message in stream mode, or do we need to reset the session?
+- **Concurrency**: Warm workers handle one task at a time. For concurrent tasks, keep both warm (fast) and cold (overflow) pools.
+- **Idle timeout**: Kill idle warm workers after N minutes to free memory. Respawn on next task.
+- **Error recovery**: If a warm worker crashes or hangs, fall back to cold spawn.
+
+### Architecture sketch
+
+```
+Task submitted
+  ├─ Warm worker available? → pipe task to warm worker (~0.5s)
+  └─ No warm worker? → cold spawn claude --print (~7-12s)
+```
+
+### Implementation steps
+
+1. Research `claude --input-format stream-json` protocol — message format, session state, error handling
+2. Add `WarmWorker` struct managing a persistent `exec.Cmd` with stdin/stdout pipes
+3. Add `WarmPool` with configurable pool size, idle timeout, health checks
+4. Route `WorkerPool.Run()` to prefer warm workers, fall back to cold
+5. Add config: `warm_workers: 1`, `warm_idle_timeout_min: 30`
+6. Test with sequential tasks, verify no state leakage between tasks
+
+### Constraints
+
+- Must not leak context between tasks (security)
+- Must handle worker crashes gracefully
+- Memory budget: each warm Claude session uses ~200-400MB
+- On 4CPU/8GB LXC, max 1-2 warm workers realistically
