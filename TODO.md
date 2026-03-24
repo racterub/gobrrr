@@ -61,3 +61,43 @@ The assistant currently lives in `~/github/dotfiles/assistant/` as a separate sy
 ### Goal
 
 Single repo, single `gobrrr setup` installs everything: the daemon, the Telegram session wrapper, timers, skills, and systemd units. No cross-repo symlinks.
+
+## Async Dispatch with Result Context
+
+### Problem
+
+The Telegram channel session (main brain) and gobrrr workers have a context gap:
+
+- `gobrrr submit --reply-to stdout` — session gets result in context but **blocks** while waiting. Can't handle other Telegram messages. Makes the queue pointless.
+- `gobrrr submit --reply-to telegram` — session stays responsive but **loses context** of what the worker said. If user follows up, the session doesn't know the worker's answer.
+
+### What we want
+
+Non-blocking dispatch where the session stays responsive AND gets worker results back into its conversation context.
+
+### Possible approaches
+
+**A. Telegram channel MCP sees bot's own messages**
+- If the Telegram channel plugin receives the bot's own outgoing messages, then `--reply-to telegram` would naturally inject results into the session's context.
+- Need to verify: does `plugin:telegram` show the bot's own messages sent via Bot API?
+- If yes, this is the simplest solution — zero code changes needed.
+
+**B. File-based result injection**
+- Worker writes result to a known file (e.g., `~/.gobrrr/results/<task-id>.txt`)
+- Session polls or watches for result files, reads them back into context
+- `gobrrr submit --reply-to file:~/.gobrrr/results/<task-id>.txt` + session reads file after
+
+**C. Daemon push via a local channel**
+- gobrrr daemon could expose a streaming endpoint (`GET /tasks/stream`)
+- Session opens a background connection, receives results as they complete
+- Complex but keeps the session fully informed
+
+**D. Non-blocking submit with deferred read**
+- `gobrrr submit --prompt "..." --reply-to deferred` returns task ID immediately
+- Session continues handling messages
+- Periodically or on idle: `gobrrr collect` reads all completed task results
+- Session processes results in batch
+
+### Key question to resolve
+
+Does `plugin:telegram` see the bot's own messages? If yes, approach A wins. If no, approach D (deferred collect) is probably the simplest.
