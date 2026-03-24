@@ -276,6 +276,176 @@ func (c *Client) DeleteMemory(id string) error {
 	return nil
 }
 
+// --- Gmail methods ---
+
+// gmailListRequest mirrors the daemon's POST /gmail/list body.
+type gmailListRequest struct {
+	Query      string `json:"query"`
+	MaxResults int    `json:"max_results"`
+	Account    string `json:"account"`
+}
+
+// gmailReadRequest mirrors the daemon's POST /gmail/read body.
+type gmailReadRequest struct {
+	MessageID string `json:"message_id"`
+	Account   string `json:"account"`
+}
+
+// gmailSendRequest mirrors the daemon's POST /gmail/send body.
+type gmailSendRequest struct {
+	To      string `json:"to"`
+	Subject string `json:"subject"`
+	Body    string `json:"body"`
+	Account string `json:"account"`
+}
+
+// gmailReplyRequest mirrors the daemon's POST /gmail/reply body.
+type gmailReplyRequest struct {
+	MessageID string `json:"message_id"`
+	Body      string `json:"body"`
+	Account   string `json:"account"`
+}
+
+// GmailList fetches a list of messages matching query for the given account.
+// It returns the raw JSON response body as a string.
+func (c *Client) GmailList(query string, maxResults int, account string) (string, error) {
+	return c.GmailListWithTaskID(query, maxResults, account, "")
+}
+
+// GmailListWithTaskID is like GmailList but attaches an X-Gobrrr-Task-ID header.
+func (c *Client) GmailListWithTaskID(query string, maxResults int, account, taskID string) (string, error) {
+	body := gmailListRequest{Query: query, MaxResults: maxResults, Account: account}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("marshalling request: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/gmail/list", bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if taskID != "" {
+		req.Header.Set("X-Gobrrr-Task-ID", taskID)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("POST /gmail/list: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %d from POST /gmail/list", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("reading response: %w", err)
+	}
+	return string(raw), nil
+}
+
+// GmailRead fetches the full content of a message by ID for the given account.
+// It returns the raw JSON response body as a string.
+func (c *Client) GmailRead(messageID, account string) (string, error) {
+	return c.GmailReadWithTaskID(messageID, account, "")
+}
+
+// GmailReadWithTaskID is like GmailRead but attaches an X-Gobrrr-Task-ID header.
+func (c *Client) GmailReadWithTaskID(messageID, account, taskID string) (string, error) {
+	body := gmailReadRequest{MessageID: messageID, Account: account}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("marshalling request: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/gmail/read", bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if taskID != "" {
+		req.Header.Set("X-Gobrrr-Task-ID", taskID)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("POST /gmail/read: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %d from POST /gmail/read", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("reading response: %w", err)
+	}
+	return string(raw), nil
+}
+
+// GmailSend sends an email via the daemon.
+func (c *Client) GmailSend(to, subject, body, account string) error {
+	return c.GmailSendWithTaskID(to, subject, body, account, "")
+}
+
+// GmailSendWithTaskID is like GmailSend but attaches an X-Gobrrr-Task-ID header.
+func (c *Client) GmailSendWithTaskID(to, subject, body, account, taskID string) error {
+	reqBody := gmailSendRequest{To: to, Subject: subject, Body: body, Account: account}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshalling request: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/gmail/send", bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if taskID != "" {
+		req.Header.Set("X-Gobrrr-Task-ID", taskID)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST /gmail/send: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("write not permitted: task does not have allow_writes")
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status %d from POST /gmail/send", resp.StatusCode)
+	}
+	return nil
+}
+
+// GmailReply sends a reply to the given message via the daemon.
+func (c *Client) GmailReply(messageID, body, account string) error {
+	return c.GmailReplyWithTaskID(messageID, body, account, "")
+}
+
+// GmailReplyWithTaskID is like GmailReply but attaches an X-Gobrrr-Task-ID header.
+func (c *Client) GmailReplyWithTaskID(messageID, body, account, taskID string) error {
+	reqBody := gmailReplyRequest{MessageID: messageID, Body: body, Account: account}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshalling request: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/gmail/reply", bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if taskID != "" {
+		req.Header.Set("X-Gobrrr-Task-ID", taskID)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST /gmail/reply: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("write not permitted: task does not have allow_writes")
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("unexpected status %d from POST /gmail/reply", resp.StatusCode)
+	}
+	return nil
+}
+
 // Health returns the daemon health information.
 func (c *Client) Health() (map[string]interface{}, error) {
 	resp, err := c.httpClient.Get(c.baseURL + "/health")

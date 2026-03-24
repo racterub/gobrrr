@@ -212,8 +212,98 @@ var denyCmd = &cobra.Command{
 var gmailCmd = &cobra.Command{
 	Use:   "gmail",
 	Short: "Gmail integration",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("not implemented")
+}
+
+// gmail list flags
+var (
+	gmailListUnread  bool
+	gmailListQuery   string
+	gmailListLimit   int
+	gmailListAccount string
+)
+
+var gmailListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List Gmail messages",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		query := gmailListQuery
+		if gmailListUnread && query == "" {
+			query = "is:unread"
+		} else if gmailListUnread {
+			query = "is:unread " + query
+		}
+		c := newClient()
+		result, err := c.GmailListWithTaskID(query, gmailListLimit, gmailListAccount, os.Getenv("GOBRRR_TASK_ID"))
+		if err != nil {
+			return err
+		}
+		fmt.Print(result)
+		return nil
+	},
+}
+
+// gmail read flags
+var gmailReadAccount string
+
+var gmailReadCmd = &cobra.Command{
+	Use:   "read <message-id>",
+	Short: "Read a Gmail message",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		result, err := c.GmailReadWithTaskID(args[0], gmailReadAccount, os.Getenv("GOBRRR_TASK_ID"))
+		if err != nil {
+			return err
+		}
+		fmt.Print(result)
+		return nil
+	},
+}
+
+// gmail send flags
+var (
+	gmailSendTo      string
+	gmailSendSubject string
+	gmailSendBody    string
+	gmailSendAccount string
+)
+
+var gmailSendCmd = &cobra.Command{
+	Use:   "send",
+	Short: "Send a Gmail message",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if gmailSendTo == "" {
+			return fmt.Errorf("--to is required")
+		}
+		c := newClient()
+		if err := c.GmailSendWithTaskID(gmailSendTo, gmailSendSubject, gmailSendBody, gmailSendAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
+			return err
+		}
+		fmt.Println("Message sent.")
+		return nil
+	},
+}
+
+// gmail reply flags
+var (
+	gmailReplyBody    string
+	gmailReplyAccount string
+)
+
+var gmailReplyCmd = &cobra.Command{
+	Use:   "reply <message-id>",
+	Short: "Reply to a Gmail message",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if gmailReplyBody == "" {
+			return fmt.Errorf("--body is required")
+		}
+		c := newClient()
+		if err := c.GmailReplyWithTaskID(args[0], gmailReplyBody, gmailReplyAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
+			return err
+		}
+		fmt.Println("Reply sent.")
+		return nil
 	},
 }
 
@@ -370,6 +460,26 @@ func init() {
 	memoryCmd.AddCommand(memoryListCmd)
 	memoryCmd.AddCommand(memoryGetCmd)
 	memoryCmd.AddCommand(memoryDeleteCmd)
+
+	gmailListCmd.Flags().BoolVar(&gmailListUnread, "unread", false, "Filter to unread messages")
+	gmailListCmd.Flags().StringVar(&gmailListQuery, "query", "", "Gmail search query")
+	gmailListCmd.Flags().IntVar(&gmailListLimit, "limit", 10, "Maximum number of messages to return")
+	gmailListCmd.Flags().StringVar(&gmailListAccount, "account", "default", "Account name")
+
+	gmailReadCmd.Flags().StringVar(&gmailReadAccount, "account", "default", "Account name")
+
+	gmailSendCmd.Flags().StringVar(&gmailSendTo, "to", "", "Recipient email address (required)")
+	gmailSendCmd.Flags().StringVar(&gmailSendSubject, "subject", "", "Email subject")
+	gmailSendCmd.Flags().StringVar(&gmailSendBody, "body", "", "Email body")
+	gmailSendCmd.Flags().StringVar(&gmailSendAccount, "account", "default", "Account name")
+
+	gmailReplyCmd.Flags().StringVar(&gmailReplyBody, "body", "", "Reply body (required)")
+	gmailReplyCmd.Flags().StringVar(&gmailReplyAccount, "account", "default", "Account name")
+
+	gmailCmd.AddCommand(gmailListCmd)
+	gmailCmd.AddCommand(gmailReadCmd)
+	gmailCmd.AddCommand(gmailSendCmd)
+	gmailCmd.AddCommand(gmailReplyCmd)
 
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(submitCmd)
