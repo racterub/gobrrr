@@ -29,7 +29,7 @@ fi
 
 # Build
 echo "Building..."
-CGO_ENABLED=0 go build -o "$HOME/.local/bin/gobrrr" ./cmd/gobrrr/
+cd daemon && CGO_ENABLED=0 go build -o "$HOME/.local/bin/gobrrr" ./cmd/gobrrr/
 echo "Installed to ~/.local/bin/gobrrr"
 
 # Run setup

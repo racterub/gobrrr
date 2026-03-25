@@ -36,49 +36,52 @@ CLI / Skills     ──▶   (Task queue)
 ## Build
 
 ```bash
-CGO_ENABLED=0 go build -o gobrrr ./cmd/gobrrr/
+cd daemon && CGO_ENABLED=0 go build -o gobrrr ./cmd/gobrrr/
 ```
 
 ## Test
 
 ```bash
-go test ./...
+cd daemon && go test ./...
 ```
 
 ## Project Structure
 
 ```
-cmd/gobrrr/main.go          CLI entrypoint (cobra)
-internal/
-  config/                    Config loading, defaults, GobrrDir()
-  crypto/                    AES-256-GCM vault, master key
-  daemon/
-    daemon.go                Unix socket HTTP API, route registration
-    queue.go                 Task queue with persistence, priority, crash recovery
-    worker.go                Worker pool, process spawning, identity/memory injection
-    routing.go               Result routing (telegram/stdout/file), output sanitization
-    heartbeat.go             Uptime Kuma push heartbeats
-    healthcheck.go           Health status evaluation (stuck tasks, failure streaks)
-    maintenance.go           Hourly log/queue pruning
-    watchdog.go              Systemd sd_notify watchdog
-  google/
-    auth.go                  Multi-account OAuth2, encrypted storage
-    gmail.go                 Gmail API (list, read, send, reply)
-    calendar.go              Calendar API (today, week, CRUD)
-    boundary.go              UNTRUSTED marker wrapping
-    retry.go                 Exponential backoff for Google API errors
-  identity/                  Load identity.md, build prompts
-  memory/                    Persistent memory store, tag search, relevance matching
-  security/
-    permissions.go           Per-task settings.json generation
-    sanitize.go              Credential leak detection in output
-    confirm.go               Approval gate for write actions
-  telegram/                  Bot API notification, message splitting
-  setup/                     Interactive setup wizard
-  client/                    HTTP-over-Unix-socket client for CLI
-skills/                      SKILL.md files (gmail, calendar, browser, memory, dispatch)
-systemd/                     gobrrr.service unit
-scripts/                     setup.sh, uninstall.sh
+daemon/                        Go daemon and CLI
+  cmd/gobrrr/main.go          CLI entrypoint (cobra)
+  internal/
+    config/                    Config loading, defaults, GobrrDir()
+    crypto/                    AES-256-GCM vault, master key
+    daemon/
+      daemon.go                Unix socket HTTP API, route registration
+      queue.go                 Task queue with persistence, priority, crash recovery
+      worker.go                Worker pool, process spawning, identity/memory injection
+      routing.go               Result routing (telegram/stdout/file), output sanitization
+      heartbeat.go             Uptime Kuma push heartbeats
+      healthcheck.go           Health status evaluation (stuck tasks, failure streaks)
+      maintenance.go           Hourly log/queue pruning
+      watchdog.go              Systemd sd_notify watchdog
+    google/
+      auth.go                  Multi-account OAuth2, encrypted storage
+      gmail.go                 Gmail API (list, read, send, reply)
+      calendar.go              Calendar API (today, week, CRUD)
+      boundary.go              UNTRUSTED marker wrapping
+      retry.go                 Exponential backoff for Google API errors
+    identity/                  Load identity.md, build prompts
+    memory/                    Persistent memory store, tag search, relevance matching
+    security/
+      permissions.go           Per-task settings.json generation
+      sanitize.go              Credential leak detection in output
+      confirm.go               Approval gate for write actions
+    telegram/                  Bot API notification, message splitting
+    setup/                     Interactive setup wizard
+    client/                    HTTP-over-Unix-socket client for CLI
+  skills/                      SKILL.md files (gmail, calendar, browser, memory, dispatch)
+  systemd/                     gobrrr.service unit
+  scripts/                     setup.sh, uninstall.sh
+  go.mod                       Go module (github.com/racterub/gobrrr)
+  go.sum                       Go dependency checksums
 ```
 
 ## Runtime Data (`~/.gobrrr/`)
