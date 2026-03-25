@@ -308,6 +308,30 @@ func TestGetReturnsErrorForUnknownID(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestTaskDeliveredFieldPersistence verifies that MarkDelivered sets the
+// Delivered field and that it survives a reload from disk.
+func TestTaskDeliveredFieldPersistence(t *testing.T) {
+	dir := t.TempDir()
+	q := daemon.NewQueue(filepath.Join(dir, "queue.json"))
+
+	task, err := q.Submit("test prompt", "channel", 0, false, 300)
+	require.NoError(t, err)
+
+	err = q.Complete(task.ID, "result")
+	require.NoError(t, err)
+
+	err = q.MarkDelivered(task.ID)
+	require.NoError(t, err)
+
+	q2, err := daemon.LoadQueue(filepath.Join(dir, "queue.json"))
+	require.NoError(t, err)
+
+	reloaded, err := q2.Get(task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, reloaded)
+	assert.True(t, reloaded.Delivered)
+}
+
 // TestCancelTask verifies that cancelling a queued task sets its status to
 // "cancelled".
 func TestCancelTask(t *testing.T) {

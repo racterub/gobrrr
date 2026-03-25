@@ -29,6 +29,7 @@ type Task struct {
 	TimeoutSec  int               `json:"timeout_sec"`
 	Result      *string           `json:"result"`
 	Error       *string           `json:"error"`
+	Delivered   bool              `json:"delivered"`
 	Metadata    map[string]string `json:"metadata"`
 }
 
@@ -215,6 +216,19 @@ func (q *Queue) Cancel(id string) error {
 		return fmt.Errorf("persisting queue: %w", err)
 	}
 	return nil
+}
+
+// MarkDelivered marks the task with the given ID as delivered and persists.
+func (q *Queue) MarkDelivered(id string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	t, err := q.findLocked(id)
+	if err != nil {
+		return err
+	}
+	t.Delivered = true
+	return q.flush()
 }
 
 // Get returns the task with the given ID, or an error if not found.
