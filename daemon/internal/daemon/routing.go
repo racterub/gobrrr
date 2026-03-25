@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -15,12 +16,30 @@ import (
 )
 
 // routeResult delivers the result of a completed task to its designated
-// reply_to destination. Before sending to telegram, the result is scanned for
-// potential credential leaks. If a leak is detected, the result is quarantined
-// to the task log and a warning is sent instead.
+// reply_to destination(s). Supports comma-separated destinations for
+// multi-destination routing. Before sending to telegram or channel, the
+// result is scanned for potential credential leaks. If a leak is detected,
+// the result is quarantined to the task log and a warning is sent instead.
 func (d *Daemon) routeResult(task *Task, result string) error {
+	destinations := strings.Split(task.ReplyTo, ",")
+	var errs []error
+
+	for _, dest := range destinations {
+		dest = strings.TrimSpace(dest)
+		if err := d.routeToDestination(task, result, dest); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", dest, err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("routing errors: %v", errors.Join(errs...))
+	}
+	return nil
+}
+
+func (d *Daemon) routeToDestination(task *Task, result, dest string) error {
 	switch {
-	case task.ReplyTo == "telegram":
+	case dest == "telegram":
 		if d.notifier == nil {
 			return fmt.Errorf("telegram not configured")
 		}
@@ -30,18 +49,30 @@ func (d *Daemon) routeResult(task *Task, result string) error {
 			return d.notifier.Send("\u26a0\ufe0f Task result contained potential credential leak and was quarantined. Check logs.")
 		}
 		return d.notifier.Send(result)
-	case task.ReplyTo == "stdout":
-		// Result is already stored on the task via queue.Complete; polling
-		// clients will pick it up via GET /tasks/{id}.
+	case dest == "stdout":
+		task.Result = &result
 		return nil
-	case strings.HasPrefix(task.ReplyTo, "file:"):
-		return d.writeFileResult(task.ReplyTo[5:], result)
-	default:
-		if task.ReplyTo == "" {
-			return nil
+	case strings.HasPrefix(dest, "file:"):
+		path := strings.TrimPrefix(dest, "file:")
+		return d.writeFileResult(path, result)
+	case dest == "channel":
+		scan := security.Check(result, d.knownSecrets())
+		if scan.HasLeak {
+			d.quarantineResult(task, result, scan.Matches)
+			return fmt.Errorf("credential leak detected, result quarantined")
 		}
-		return fmt.Errorf("unknown reply_to: %s", task.ReplyTo)
+		return d.emitToSSE(task, result)
+	case dest == "":
+		return nil
+	default:
+		return fmt.Errorf("unknown reply_to: %s", dest)
 	}
+}
+
+// emitToSSE sends a task result to connected SSE clients.
+func (d *Daemon) emitToSSE(task *Task, result string) error {
+	// Placeholder — implemented in Task 6
+	return nil
 }
 
 // knownSecrets returns a list of sensitive values that should never appear in

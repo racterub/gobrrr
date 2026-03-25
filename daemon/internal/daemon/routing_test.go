@@ -166,6 +166,29 @@ func TestRouteToTelegramQuarantinesLeak(t *testing.T) {
 	assert.Contains(t, string(logData), leakyResult)
 }
 
+func TestRouteResultMultiDestination(t *testing.T) {
+	d := newTestDaemon(t, nil)
+	t.Setenv("GOBRRR_DIR", d.gobrrDir)
+
+	outPath := filepath.Join(d.gobrrDir, "output", "result.txt")
+	task := &Task{
+		ID:      "t_multi",
+		ReplyTo: "file:" + outPath + ",stdout",
+		Status:  "completed",
+	}
+	result := "multi-destination result"
+
+	err := d.routeResult(task, result)
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(outPath)
+	require.NoError(t, err)
+	assert.Equal(t, result, string(content))
+
+	assert.NotNil(t, task.Result)
+	assert.Equal(t, result, *task.Result)
+}
+
 func TestRouteToTelegramCleanOutputNotQuarantined(t *testing.T) {
 	var received string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
