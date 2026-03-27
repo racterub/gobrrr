@@ -31,7 +31,12 @@ install: build
 	cd channel && bun install
 	@echo ""
 	@echo "Binary installed to ~/.local/bin/gobrrr"
-	@echo "Run 'gobrrr setup' to configure"
+	@echo ""
+	@echo "To register the channel, add to your .mcp.json:"
+	@echo '  "gobrrr": { "command": "bun", "args": ["$(CURDIR)/channel/index.ts"] }'
+	@echo ""
+	@echo "Then start Claude Code with:"
+	@echo "  claude --dangerously-load-development-channels server:gobrrr"
 
 clean:
 	rm -f daemon/gobrrr
