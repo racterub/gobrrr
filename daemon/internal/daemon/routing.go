@@ -71,7 +71,14 @@ func (d *Daemon) routeToDestination(task *Task, result, dest string) error {
 
 // emitToSSE sends a task result to connected SSE clients.
 func (d *Daemon) emitToSSE(task *Task, result string) error {
-	// Placeholder — implemented in Task 6
+	if d.sseHub == nil {
+		return nil
+	}
+	event := BuildTaskResultEvent(task, result)
+	d.sseHub.Emit(event)
+	if d.sseHub.ClientCount() > 0 {
+		_ = d.queue.MarkDelivered(task.ID)
+	}
 	return nil
 }
 

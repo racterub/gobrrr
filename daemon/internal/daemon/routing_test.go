@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,7 @@ func newTestDaemon(t *testing.T, notifier *telegram.Notifier) *Daemon {
 		queue:      q,
 		workerPool: wp,
 		notifier:   notifier,
+		sseHub:     NewSSEHub(),
 	}
 }
 
@@ -209,4 +211,33 @@ func TestRouteToTelegramCleanOutputNotQuarantined(t *testing.T) {
 
 	assert.Contains(t, received, "3 meetings today")
 	assert.NotContains(t, received, "quarantined")
+}
+
+func TestSSEIntegration(t *testing.T) {
+	d := newTestDaemon(t, nil)
+
+	// Subscribe to SSE events
+	ch := d.sseHub.Subscribe()
+	defer d.sseHub.Unsubscribe(ch)
+
+	task := &Task{
+		ID:        "t_sse_test",
+		Prompt:    "test prompt for SSE",
+		ReplyTo:   "channel",
+		Status:    "completed",
+		CreatedAt: time.Now().UTC(),
+	}
+
+	err := d.routeResult(task, "SSE test result")
+	require.NoError(t, err)
+
+	select {
+	case event := <-ch:
+		assert.Equal(t, "t_sse_test", event.TaskID)
+		assert.Equal(t, "completed", event.Status)
+		assert.Equal(t, "SSE test result", event.Result)
+		assert.Equal(t, "test prompt for SSE", event.PromptSummary)
+	case <-time.After(time.Second):
+		t.Fatal("did not receive SSE event")
+	}
 }

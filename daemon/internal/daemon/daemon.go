@@ -34,6 +34,7 @@ type Daemon struct {
 	memStore      *memory.Store
 	accountMgr    *google.AccountManager
 	notifier      *telegram.Notifier
+	sseHub        *SSEHub
 	heartbeat     *Heartbeat
 	healthChecker *HealthChecker
 	confirmGate   *security.Gate
@@ -94,6 +95,7 @@ func New(cfg *config.Config, socket string) *Daemon {
 		memStore:      ms,
 		accountMgr:    acctMgr,
 		notifier:      notifier,
+		sseHub:        NewSSEHub(),
 		heartbeat:     hb,
 		healthChecker: hc,
 		confirmGate:   security.NewGate(5 * time.Minute),
@@ -133,6 +135,7 @@ func New(cfg *config.Config, socket string) *Daemon {
 	d.mux.HandleFunc("POST /gcal/create", d.handleGcalCreate)
 	d.mux.HandleFunc("POST /gcal/update", d.handleGcalUpdate)
 	d.mux.HandleFunc("POST /gcal/delete", d.handleGcalDelete)
+	d.mux.HandleFunc("GET /tasks/results/stream", d.sseHub.ServeSSE)
 	return d
 }
 
