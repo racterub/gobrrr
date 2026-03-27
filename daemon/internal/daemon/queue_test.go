@@ -332,6 +332,34 @@ func TestTaskDeliveredFieldPersistence(t *testing.T) {
 	assert.True(t, reloaded.Delivered)
 }
 
+func TestLoadQueueCrashRecoveryFlushesToDisk(t *testing.T) {
+	dir := t.TempDir()
+	queuePath := filepath.Join(dir, "queue.json")
+	q := daemon.NewQueue(queuePath)
+
+	// Submit and start a task (moves to running)
+	task, err := q.Submit("crash test", "stdout", 0, false, 300)
+	require.NoError(t, err)
+	next, err := q.Next()
+	require.NoError(t, err)
+	assert.Equal(t, task.ID, next.ID)
+	assert.Equal(t, "running", next.Status)
+
+	// Simulate crash: reload from disk (running task on disk)
+	q2, err := daemon.LoadQueue(queuePath)
+	require.NoError(t, err)
+
+	recovered, err := q2.Get(task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "queued", recovered.Status, "in-memory state should be queued")
+
+	// Key assertion: read raw disk to verify flush happened
+	raw, err := os.ReadFile(queuePath)
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), `"status": "queued"`)
+	assert.NotContains(t, string(raw), `"status": "running"`)
+}
+
 // TestCancelTask verifies that cancelling a queued task sets its status to
 // "cancelled".
 func TestCancelTask(t *testing.T) {

@@ -68,14 +68,23 @@ func LoadQueue(path string) (*Queue, error) {
 		return nil, fmt.Errorf("parsing queue file: %w", err)
 	}
 
+	recovered := false
 	for _, t := range envelope.Tasks {
 		if t.Status == "running" {
 			t.Status = "queued"
 			t.StartedAt = nil
+			recovered = true
 		}
 	}
 
 	q.tasks = envelope.Tasks
+
+	if recovered {
+		if err := q.flush(); err != nil {
+			return nil, fmt.Errorf("persisting crash recovery: %w", err)
+		}
+	}
+
 	return q, nil
 }
 
