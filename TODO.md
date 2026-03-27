@@ -90,9 +90,17 @@ Single repo, single `gobrrr setup` installs everything: the daemon, the Telegram
 - Should check prerequisites before starting (arch, OS, systemd user session)
 - Single command: `curl -fsSL .../install.sh | bash` or `./install.sh`
 
-## Async Dispatch with Result Context
+## ~~Async Dispatch with Result Context~~ (DONE)
 
-### Problem
+Implemented via Claude Code channel mechanism. See `docs/specs/2026-03-25-async-dispatch-design.md`.
+
+- Daemon SSE endpoint: `GET /tasks/results/stream`
+- Channel bridge: `channel/index.ts` (Bun MCP server)
+- Multi-destination routing: `--reply-to channel,telegram`
+- Folder restructured: `daemon/` (Go) + `channel/` (Bun/TS)
+
+<details>
+<summary>Original problem statement</summary>
 
 The Telegram channel session (main brain) and gobrrr workers have a context gap:
 
@@ -129,3 +137,4 @@ Non-blocking dispatch where the session stays responsive AND gets worker results
 ### Key question to resolve
 
 Does `plugin:telegram` see the bot's own messages? If yes, approach A wins. If no, approach D (deferred collect) is probably the simplest.
+</details>
