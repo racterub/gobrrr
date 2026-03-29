@@ -20,6 +20,16 @@ type UptimeKumaConfig struct {
 	IntervalSec int    `json:"interval_sec"`
 }
 
+// TelegramSessionConfig holds configuration for the managed Telegram session.
+type TelegramSessionConfig struct {
+	Enabled            bool     `json:"enabled"`
+	MemoryCeilingMB    int      `json:"memory_ceiling_mb"`
+	MaxUptimeHours     int      `json:"max_uptime_hours"`
+	IdleThresholdMin   int      `json:"idle_threshold_min"`
+	MaxRestartAttempts int      `json:"max_restart_attempts"`
+	Channels           []string `json:"channels"`
+}
+
 // Config is the top-level daemon configuration.
 type Config struct {
 	Version           int              `json:"version"`
@@ -29,8 +39,9 @@ type Config struct {
 	LogRetentionDays  int              `json:"log_retention_days"`
 	SocketPath        string           `json:"socket_path"`
 	WorkspacePath     string           `json:"workspace_path"`
-	Telegram          TelegramConfig   `json:"telegram"`
-	UptimeKuma        UptimeKumaConfig `json:"uptime_kuma"`
+	Telegram          TelegramConfig        `json:"telegram"`
+	UptimeKuma        UptimeKumaConfig      `json:"uptime_kuma"`
+	TelegramSession   TelegramSessionConfig `json:"telegram_session"`
 }
 
 // Default returns a Config populated with sane defaults.
@@ -45,6 +56,13 @@ func Default() *Config {
 		WorkspacePath:     filepath.Join(GobrrDir(), "workspace"),
 		UptimeKuma: UptimeKumaConfig{
 			IntervalSec: 60,
+		},
+		TelegramSession: TelegramSessionConfig{
+			Enabled:            false,
+			MemoryCeilingMB:    3072,
+			MaxUptimeHours:     6,
+			IdleThresholdMin:   5,
+			MaxRestartAttempts: 6,
 		},
 	}
 }
@@ -66,7 +84,30 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	applyTelegramSessionDefaults(cfg)
+
 	return cfg, nil
+}
+
+// applyTelegramSessionDefaults fills zero-value fields in TelegramSession with
+// defaults. json.Unmarshal overwrites the entire nested struct when the key is
+// present, zeroing fields absent from JSON, so defaults must be reapplied after
+// unmarshal.
+func applyTelegramSessionDefaults(cfg *Config) {
+	d := Default().TelegramSession
+	ts := &cfg.TelegramSession
+	if ts.MemoryCeilingMB == 0 {
+		ts.MemoryCeilingMB = d.MemoryCeilingMB
+	}
+	if ts.MaxUptimeHours == 0 {
+		ts.MaxUptimeHours = d.MaxUptimeHours
+	}
+	if ts.IdleThresholdMin == 0 {
+		ts.IdleThresholdMin = d.IdleThresholdMin
+	}
+	if ts.MaxRestartAttempts == 0 {
+		ts.MaxRestartAttempts = d.MaxRestartAttempts
+	}
 }
 
 // GobrrDir returns the gobrrr data directory. It respects the GOBRRR_DIR

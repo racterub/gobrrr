@@ -76,3 +76,39 @@ func TestGobrrDirDefault(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, ".gobrrr"), dir)
 }
+
+func TestDefaultTelegramSessionConfig(t *testing.T) {
+	cfg := config.Default()
+
+	assert.False(t, cfg.TelegramSession.Enabled)
+	assert.Equal(t, 3072, cfg.TelegramSession.MemoryCeilingMB)
+	assert.Equal(t, 6, cfg.TelegramSession.MaxUptimeHours)
+	assert.Equal(t, 5, cfg.TelegramSession.IdleThresholdMin)
+	assert.Equal(t, 6, cfg.TelegramSession.MaxRestartAttempts)
+}
+
+func TestLoadConfigPreservesTelegramSessionDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	// Partial telegram_session: only enabled and memory_ceiling_mb set.
+	// Other fields should get defaults from applyTelegramSessionDefaults().
+	data := []byte(`{
+		"telegram_session": {
+			"enabled": true,
+			"memory_ceiling_mb": 2048,
+			"channels": ["plugin:telegram@claude-plugins-official"]
+		}
+	}`)
+	require.NoError(t, os.WriteFile(path, data, 0600))
+
+	cfg, err := config.Load(path)
+	require.NoError(t, err)
+
+	assert.True(t, cfg.TelegramSession.Enabled)
+	assert.Equal(t, 2048, cfg.TelegramSession.MemoryCeilingMB)
+	// Defaults applied for unset fields via applyTelegramSessionDefaults()
+	assert.Equal(t, 6, cfg.TelegramSession.MaxUptimeHours)
+	assert.Equal(t, 5, cfg.TelegramSession.IdleThresholdMin)
+	assert.Equal(t, 6, cfg.TelegramSession.MaxRestartAttempts)
+}
