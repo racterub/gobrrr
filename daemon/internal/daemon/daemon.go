@@ -19,7 +19,9 @@ import (
 	vault "github.com/racterub/gobrrr/internal/crypto"
 	"github.com/racterub/gobrrr/internal/google"
 	"github.com/racterub/gobrrr/internal/memory"
+	"github.com/racterub/gobrrr/internal/scheduler"
 	"github.com/racterub/gobrrr/internal/security"
+	"github.com/racterub/gobrrr/internal/session"
 	"github.com/racterub/gobrrr/internal/telegram"
 )
 
@@ -39,6 +41,9 @@ type Daemon struct {
 	healthChecker *HealthChecker
 	confirmGate   *security.Gate
 	startTime     time.Time
+	session       *session.Manager
+	scheduler     *scheduler.Scheduler
+	ctx           context.Context
 }
 
 // New creates a new Daemon configured to listen on the given socket path.
@@ -101,6 +106,28 @@ func New(cfg *config.Config, socket string) *Daemon {
 		confirmGate:   security.NewGate(5 * time.Minute),
 	}
 
+	// Session manager
+	// IMPORTANT: avoid nil-interface trap — a nil *telegram.Notifier passed to
+	// an interface parameter creates a non-nil interface that panics on Send().
+	if cfg.TelegramSession.Enabled {
+		var sessionNotifier session.Notifier
+		if notifier != nil {
+			sessionNotifier = notifier
+		}
+		d.session = session.NewManager(cfg.TelegramSession, sessionNotifier)
+		d.session.SetWorkDir(cfg.WorkspacePath)
+	}
+
+	// Scheduler
+	schedulerPath := filepath.Join(gobrrDir, "schedules.json")
+	d.scheduler = scheduler.New(schedulerPath, func(prompt, replyTo string, allowWrites bool) error {
+		_, err := d.queue.Submit(prompt, replyTo, 5, allowWrites, cfg.DefaultTimeoutSec)
+		return err
+	})
+	if err := d.scheduler.Load(); err != nil {
+		log.Printf("scheduler: failed to load: %v", err)
+	}
+
 	// Wire result routing callback into the worker pool.
 	wp.onResult = func(task *Task, result string) {
 		if err := d.routeResult(task, result); err != nil {
@@ -136,6 +163,16 @@ func New(cfg *config.Config, socket string) *Daemon {
 	d.mux.HandleFunc("POST /gcal/update", d.handleGcalUpdate)
 	d.mux.HandleFunc("POST /gcal/delete", d.handleGcalDelete)
 	d.mux.HandleFunc("GET /tasks/results/stream", d.sseHub.ServeSSE)
+
+	d.mux.HandleFunc("GET /session/status", d.handleSessionStatus)
+	d.mux.HandleFunc("POST /session/start", d.handleSessionStart)
+	d.mux.HandleFunc("POST /session/stop", d.handleSessionStop)
+	d.mux.HandleFunc("POST /session/restart", d.handleSessionRestart)
+
+	d.mux.HandleFunc("POST /schedules", d.handleCreateSchedule)
+	d.mux.HandleFunc("GET /schedules", d.handleListSchedules)
+	d.mux.HandleFunc("DELETE /schedules/{name}", d.handleRemoveSchedule)
+
 	return d
 }
 
@@ -143,6 +180,7 @@ func New(cfg *config.Config, socket string) *Daemon {
 // It returns nil on graceful shutdown.
 func (d *Daemon) Run(ctx context.Context) error {
 	d.startTime = time.Now()
+	d.ctx = ctx
 
 	// Start systemd watchdog (no-op if NOTIFY_SOCKET is not set).
 	go StartWatchdog(ctx)
@@ -158,6 +196,15 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Start hourly maintenance loop for log and queue pruning.
 	go d.runMaintenance(ctx)
+
+	// Start scheduler catch-up and tick loop.
+	d.scheduler.CatchUp()
+	go d.scheduler.Run(ctx)
+
+	// Start telegram session supervisor.
+	if d.session != nil {
+		go d.session.Run(ctx)
+	}
 
 	// Remove any stale socket file before binding.
 	_ = os.Remove(d.socket)
@@ -893,4 +940,101 @@ func loadVaultIfAvailable(gobrrDir string) (*vault.Vault, error) {
 		return nil, nil //nolint:nilerr // key absence is expected when not configured
 	}
 	return vault.New(key), nil
+}
+
+// --- Session handlers ---
+
+func (d *Daemon) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if d.session == nil {
+		json.NewEncoder(w).Encode(map[string]any{"enabled": false}) //nolint:errcheck
+		return
+	}
+	pid, uptime, memMB, idle := d.session.Status()
+	json.NewEncoder(w).Encode(map[string]any{
+		"enabled": true,
+		"running": d.session.Running(),
+		"pid":     pid,
+		"uptime":  uptime.String(),
+		"mem_mb":  memMB,
+		"idle":    idle.String(),
+	}) //nolint:errcheck
+}
+
+func (d *Daemon) handleSessionStart(w http.ResponseWriter, r *http.Request) {
+	if d.session == nil {
+		http.Error(w, `{"error":"session not configured"}`, http.StatusBadRequest)
+		return
+	}
+	if d.session.Running() {
+		http.Error(w, `{"error":"session already running"}`, http.StatusConflict)
+		return
+	}
+	d.session.Start(d.ctx)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "starting"}) //nolint:errcheck
+}
+
+func (d *Daemon) handleSessionStop(w http.ResponseWriter, r *http.Request) {
+	if d.session == nil {
+		http.Error(w, `{"error":"session not configured"}`, http.StatusBadRequest)
+		return
+	}
+	d.session.Stop()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "stopped"}) //nolint:errcheck
+}
+
+func (d *Daemon) handleSessionRestart(w http.ResponseWriter, r *http.Request) {
+	if d.session == nil {
+		http.Error(w, `{"error":"session not configured"}`, http.StatusBadRequest)
+		return
+	}
+	d.session.Stop()
+	d.session.Start(d.ctx)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "restarting"}) //nolint:errcheck
+}
+
+// --- Scheduler handlers ---
+
+func (d *Daemon) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name        string `json:"name"`
+		Cron        string `json:"cron"`
+		Prompt      string `json:"prompt"`
+		ReplyTo     string `json:"reply_to"`
+		AllowWrites bool   `json:"allow_writes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+		return
+	}
+	sched, err := d.scheduler.Create(req.Name, req.Cron, req.Prompt, req.ReplyTo, req.AllowWrites)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(sched) //nolint:errcheck
+}
+
+func (d *Daemon) handleListSchedules(w http.ResponseWriter, r *http.Request) {
+	schedules := d.scheduler.List()
+	if schedules == nil {
+		schedules = []*scheduler.Schedule{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(schedules) //nolint:errcheck
+}
+
+func (d *Daemon) handleRemoveSchedule(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := d.scheduler.Remove(name); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "removed"}) //nolint:errcheck
 }
