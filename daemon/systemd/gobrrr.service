@@ -8,7 +8,8 @@ StartLimitIntervalSec=0
 Type=notify
 User=claude-agent
 WorkingDirectory=/home/claude-agent/workspace
-ExecStart=/home/claude-agent/.local/bin/gobrrr daemon start
+Environment=HOME=/home/claude-agent
+ExecStart=/usr/local/bin/gobrrr daemon start
 Restart=on-failure
 RestartSec=5
 WatchdogSec=60
