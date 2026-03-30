@@ -6,10 +6,10 @@ set -euo pipefail
 # Requires: root (self-elevates)
 # Idempotent: safe to re-run for upgrades
 
-TOTAL_STEPS=18
+TOTAL_STEPS=17
 CURRENT_STEP=0
 
-trap 'echo ""; echo "FAILED at step [${CURRENT_STEP:-0}/${TOTAL_STEPS:-18}]"; echo "Check the output above for details."; exit 1' ERR
+trap 'echo ""; echo "FAILED at step [${CURRENT_STEP:-0}/${TOTAL_STEPS:-17}]"; echo "Check the output above for details."; exit 1' ERR
 
 step() {
     CURRENT_STEP=$((CURRENT_STEP + 1))
@@ -218,14 +218,16 @@ step "Configuring channel MCP"
 MCP_FILE="/home/claude-agent/.mcp.json"
 GOBRRR_MCP='{"type":"stdio","command":"bun","args":["run","/home/claude-agent/gobrrr/channel/index.ts"]}'
 
+MCP_TMP="${MCP_FILE}.tmp"
 if [ -f "$MCP_FILE" ]; then
     # Merge into existing config, preserving other entries
-    UPDATED=$(jq --argjson gobrrr "$GOBRRR_MCP" '.mcpServers.gobrrr = $gobrrr' "$MCP_FILE")
-    echo "$UPDATED" > "$MCP_FILE"
+    jq --argjson gobrrr "$GOBRRR_MCP" '.mcpServers.gobrrr = $gobrrr' "$MCP_FILE" > "$MCP_TMP"
+    mv "$MCP_TMP" "$MCP_FILE"
     echo "Merged gobrrr into existing $MCP_FILE"
 else
     # Create new file
-    jq -n --argjson gobrrr "$GOBRRR_MCP" '{"mcpServers":{"gobrrr":$gobrrr}}' > "$MCP_FILE"
+    jq -n --argjson gobrrr "$GOBRRR_MCP" '{"mcpServers":{"gobrrr":$gobrrr}}' > "$MCP_TMP"
+    mv "$MCP_TMP" "$MCP_FILE"
     echo "Created $MCP_FILE"
 fi
 chown claude-agent:claude-agent "$MCP_FILE"
