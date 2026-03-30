@@ -1,5 +1,44 @@
 # TODO
 
+## Channel Bridge Memory Leak
+
+The `channel/index.ts` Bun MCP process consumed all available memory (31GB) on the LXC. Root cause unknown.
+
+### Likely suspects
+
+- SSE buffer accumulation — if events aren't being consumed fast enough, the `buffer` string in `connectToStream()` may grow unbounded
+- Reconnection loop — on disconnect, new connections may pile up without cleaning old socket/buffer state
+- MCP notification backpressure — if `mcp.notification()` blocks or queues internally, events may accumulate in memory
+
+### Next steps
+
+- Reproduce and profile with `bun --inspect` or heap snapshots
+- Check if the issue correlates with SSE reconnections or high task throughput
+- Consider adding a max buffer size / event drop policy on the client side
+
+## Remove Google Integration Code
+
+`claude -p` and `claude --print` now have native access to account-level MCPs (Gmail, Calendar, etc.), so gobrrr no longer needs to mediate Google API access.
+
+### What to remove
+
+- `internal/google/` — OAuth2 auth, Gmail API, Calendar API, boundary wrapping, retry logic
+- `internal/crypto/` — AES-256-GCM vault (only used for Google credential encryption)
+- Google-related CLI commands (`gobrrr gmail`, `gobrrr gcal`)
+- Google-related skills in `skills/`
+- `google/` directory in runtime data (`~/.gobrrr/`)
+- References in config, setup wizard, and documentation
+
+### What to keep
+
+- UNTRUSTED boundary concept (may still be useful for other external content)
+- Security patterns (sanitization, confirmation gates) — these apply beyond Google
+
+### Decision needed
+
+- Confirm scope of removal — full removal vs keeping any wrappers
+- Whether to keep `internal/crypto/` for other future credential storage needs
+
 ## Warm Worker Pool
 
 Currently each task spawns a cold `claude --print` process (~7-12s startup). A warm worker pool would keep Claude sessions alive and route tasks to them, reducing dispatch latency to sub-second for simple tasks.
@@ -40,27 +79,18 @@ Task submitted
 - Memory budget: each warm Claude session uses ~200-400MB
 - On 4CPU/8GB LXC, max 1-2 warm workers realistically
 
-## Migrate Assistant into gobrrr
+## ~~Migrate Assistant into gobrrr~~ (DONE)
 
-The assistant currently lives in `~/github/dotfiles/assistant/` as a separate system. It should be migrated into this repo so gobrrr is fully self-contained.
+Migrated in the `feat/assistant-migration` branch. The assistant is now fully inside gobrrr:
 
-### What to migrate
+- `internal/session/` — Session manager with PTY spawn, rotation, crash recovery
+- `internal/scheduler/` — In-process cron scheduler replacing systemd timers
+- `skills/homelab/` and `skills/timer-management/` — Migrated skills
+- `gobrrr session start/stop/status/restart` and `gobrrr timer create/list/remove` CLI commands
+- Updated systemd unit (root-level, 4G memory) and setup wizard
 
-- `session-wrapper.sh` — Claude Telegram channel session lifecycle, rotation, crash recovery
-- `manage-timer.sh` — Systemd timer CRUD for scheduled tasks
-- `run-timer-task.sh` — Timer task execution (already calls gobrrr)
-- `send-telegram.sh` — Telegram Bot API helper
-- `check-permission.sh` — Permission self-check helper
-- `healthcheck.sh` — Health monitoring with Uptime Kuma (partially replaced by gobrrr heartbeat)
-- `config.env` — Secrets and thresholds
-- `settings.json` — Claude Code permissions for the main session
-- `systemd/claude-channels.service` — Main session systemd unit
-- `skills/` — Timer management, homelab skills
-- `CLAUDE.md` — Assistant runtime instructions
-
-### Goal
-
-Single repo, single `gobrrr setup` installs everything: the daemon, the Telegram session wrapper, timers, skills, and systemd units. No cross-repo symlinks.
+Design spec: `docs/specs/2026-03-30-assistant-migration-design.md`
+Implementation plan: `docs/plans/2026-03-30-assistant-migration.md`
 
 ## One-Command Install Script
 
@@ -89,6 +119,25 @@ Single repo, single `gobrrr setup` installs everything: the daemon, the Telegram
 - Should detect existing installation and offer upgrade vs fresh install
 - Should check prerequisites before starting (arch, OS, systemd user session)
 - Single command: `curl -fsSL .../install.sh | bash` or `./install.sh`
+
+## Telegram Routing Strategy
+
+Currently `--reply-to telegram` pushes results directly to the Telegram Bot API, and `--reply-to channel` pushes results via SSE into the main Claude session through the channel bridge MCP. These are separate paths.
+
+### Decision needed
+
+How should gobrrr tasks (both manual submissions and scheduled tasks) route their responses to Telegram?
+
+- **Direct Bot API push** — Current `--reply-to telegram` behavior. Simple, reliable, but the main Claude session has no awareness of what was sent.
+- **Channel bridge** — Route through the channel MCP so the main Claude session sees the result in context, then let the session decide whether/how to relay it to Telegram.
+- **Both** — Push to Telegram for immediate user visibility AND push to channel so the session stays informed. Current `--reply-to telegram,channel` already supports this.
+
+### Considerations
+
+- Scheduled tasks (from in-process scheduler) may not need session awareness — user just wants the result in Telegram
+- Ad-hoc dispatched tasks from the session likely want channel routing so the session can follow up
+- Should the scheduler support per-schedule `reply_to` configuration?
+- If the session is down (rotating, crashed), channel routing silently drops — should there be a fallback?
 
 ## ~~Async Dispatch with Result Context~~ (DONE)
 

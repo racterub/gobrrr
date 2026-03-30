@@ -2,15 +2,15 @@
 
 ## What This Project Is
 
-**gobrrr** is a task dispatch daemon for Claude Code. It solves the problem that `claude -p` (used for subagent dispatch and timer tasks) doesn't have access to account-level MCP integrations (Gmail, Google Calendar). Instead of relying on Claude's cloud-side MCPs, gobrrr provides these as built-in CLI commands backed by Google's Go API libraries, accessible to any Claude Code session.
+**gobrrr** is a parallel task dispatch daemon for Claude Code. It solves the problem that Claude Code sessions are single-threaded — when running a Telegram conversation, you can only handle one task at a time. gobrrr enables parallel task dispatch, spawning multiple `claude -p` workers simultaneously while your main session stays responsive.
+
+> **Note:** gobrrr originally existed to give `claude -p` workers access to account-level MCPs (Gmail, Calendar). Claude Code has since fixed this — `claude -p` and `claude --print` now have native MCP access. The project's focus has shifted to parallel execution.
 
 ### The User's Requirements
 
-- Replace `claude -p` dispatch with a system that has Gmail, Calendar, browser, and memory access
+- Parallel task execution from a single-threaded Telegram session
 - Single Go binary, no cgo, runs on a 4 CPU / 8GB LXC
 - Skills/CLI over MCP (MCP wastes context tokens)
-- Local OAuth-based Google integration (not Claude's account-level MCPs)
-- Multi-account Google support with encrypted credential storage
 - Prompt injection defense (UNTRUSTED boundaries, read-only defaults, confirmation gates)
 - Persistent memory across tasks and sessions
 - Identity system for consistent assistant personality
@@ -29,7 +29,6 @@ CLI / Skills     ──▶   (Task queue)
 
 - **Daemon** listens on `~/.gobrrr/gobrrr.sock` (HTTP/1.1 over Unix socket)
 - **Workers** are `claude --print` processes with per-task settings.json permissions
-- **Gmail/Calendar** calls go through the daemon (workers never see credentials)
 - **Memory** auto-injects relevant memories into worker prompts
 - **Identity** (`~/.gobrrr/identity.md`) injected into every worker prompt
 
@@ -74,10 +73,12 @@ daemon/                        Go daemon and CLI
       permissions.go           Per-task settings.json generation
       sanitize.go              Credential leak detection in output
       confirm.go               Approval gate for write actions
+    session/                   Telegram channel session supervisor
+    scheduler/                 In-process cron scheduler
     telegram/                  Bot API notification, message splitting
     setup/                     Interactive setup wizard
     client/                    HTTP-over-Unix-socket client for CLI
-  skills/                      SKILL.md files (gmail, calendar, browser, memory, dispatch)
+  skills/                      SKILL.md files (gmail, calendar, browser, memory, dispatch, homelab, timer-management)
   systemd/                     gobrrr.service unit
   scripts/                     setup.sh, uninstall.sh
   go.mod                       Go module (github.com/racterub/gobrrr)
@@ -87,7 +88,8 @@ daemon/                        Go daemon and CLI
 ## Runtime Data (`~/.gobrrr/`)
 
 ```
-config.json          Daemon config (concurrency, timeouts, telegram, uptime kuma)
+config.json          Daemon config (concurrency, timeouts, telegram, uptime kuma, session)
+schedules.json       Recurring task schedules (atomic writes)
 master.key           AES-256 encryption key (0600)
 gobrrr.sock          Unix socket (0600)
 queue.json           Persistent task queue (atomic writes)
@@ -102,9 +104,8 @@ output/              Safe directory for file: reply-to
 
 ## Key Design Decisions
 
-1. **Skills over MCP** — Workers call `gobrrr gmail`, `gobrrr gcal`, `gobrrr memory` as CLI commands. No MCP tool schemas consuming context.
-2. **Daemon mediates all credentials** — Workers talk to daemon over Unix socket. Daemon makes Google API calls. Workers never see OAuth tokens.
-3. **Read-only by default** — Workers can read Gmail/Calendar but not send/create unless `--allow-writes` was set at submission. Write actions require Telegram user confirmation.
+1. **Skills over MCP** — Workers call `gobrrr memory` and other CLI commands. No MCP tool schemas consuming context.
+2. **Read-only by default** — Write actions require explicit `--allow-writes` at submission. Sensitive actions require Telegram user confirmation.
 4. **UNTRUSTED boundaries** — All external content (emails, calendar events, web pages) wrapped in markers telling Claude to treat as data, not instructions.
 5. **Server-side write enforcement** — The daemon checks `allow_writes` on the task when it receives a write request, not the client. Prevents env var manipulation bypass.
 6. **JSON file persistence** — No SQLite (avoids cgo). Atomic writes via .tmp + rename. Good enough for 10-50 tasks/day single-user.
