@@ -294,23 +294,28 @@ func readLine(reader *bufio.Reader) string {
 // defaultServiceUnit is the embedded systemd service file content.
 // It mirrors systemd/gobrrr.service in the repository.
 const defaultServiceUnit = `[Unit]
-Description=gobrrr Task Dispatch Daemon
+Description=gobrrr task dispatch daemon
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=notify
-ExecStart=%h/.local/bin/gobrrr daemon start
+User=claude-agent
+WorkingDirectory=/home/claude-agent/workspace
+Environment=HOME=/home/claude-agent
+ExecStart=/usr/local/bin/gobrrr daemon start
 Restart=on-failure
 RestartSec=5
 WatchdogSec=60
-MemoryMax=512M
+MemoryMax=4G
+MemoryHigh=3072M
 KillMode=control-group
-TimeoutStopSec=30
+TimeoutStopSec=90
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=gobrrr
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
 `
