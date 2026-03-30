@@ -763,6 +763,133 @@ func (c *Client) WaitForTask(taskID string) (string, error) {
 	}
 }
 
+// --- Session methods ---
+
+// SessionStatus returns the current session status.
+func (c *Client) SessionStatus() (map[string]any, error) {
+	resp, err := c.httpClient.Get(c.baseURL + "/session/status")
+	if err != nil {
+		return nil, fmt.Errorf("GET /session/status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return result, nil
+}
+
+// SessionStart starts the Telegram session.
+func (c *Client) SessionStart() error {
+	resp, err := c.httpClient.Post(c.baseURL+"/session/start", "application/json", nil)
+	if err != nil {
+		return fmt.Errorf("POST /session/start: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("POST /session/start: %s", string(body))
+	}
+	return nil
+}
+
+// SessionStop stops the Telegram session.
+func (c *Client) SessionStop() error {
+	resp, err := c.httpClient.Post(c.baseURL+"/session/stop", "application/json", nil)
+	if err != nil {
+		return fmt.Errorf("POST /session/stop: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("POST /session/stop: %s", string(body))
+	}
+	return nil
+}
+
+// SessionRestart restarts the Telegram session.
+func (c *Client) SessionRestart() error {
+	resp, err := c.httpClient.Post(c.baseURL+"/session/restart", "application/json", nil)
+	if err != nil {
+		return fmt.Errorf("POST /session/restart: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("POST /session/restart: %s", string(body))
+	}
+	return nil
+}
+
+// --- Scheduler methods ---
+
+// CreateSchedule creates a new recurring schedule.
+func (c *Client) CreateSchedule(name, cronExpr, prompt, replyTo string, allowWrites bool) (map[string]any, error) {
+	body := struct {
+		Name        string `json:"name"`
+		Cron        string `json:"cron"`
+		Prompt      string `json:"prompt"`
+		ReplyTo     string `json:"reply_to"`
+		AllowWrites bool   `json:"allow_writes"`
+	}{name, cronExpr, prompt, replyTo, allowWrites}
+
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshalling request: %w", err)
+	}
+
+	resp, err := c.httpClient.Post(c.baseURL+"/schedules", "application/json", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("POST /schedules: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("POST /schedules: %s", string(respBody))
+	}
+
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return result, nil
+}
+
+// ListSchedules returns all scheduled tasks.
+func (c *Client) ListSchedules() ([]map[string]any, error) {
+	resp, err := c.httpClient.Get(c.baseURL + "/schedules")
+	if err != nil {
+		return nil, fmt.Errorf("GET /schedules: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return result, nil
+}
+
+// RemoveSchedule removes a schedule by name.
+func (c *Client) RemoveSchedule(name string) error {
+	req, err := http.NewRequest(http.MethodDelete, c.baseURL+"/schedules/"+name, nil)
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("DELETE /schedules/%s: %w", name, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("DELETE /schedules/%s: %s", name, string(body))
+	}
+	return nil
+}
+
 // Health returns the daemon health information.
 func (c *Client) Health() (map[string]interface{}, error) {
 	resp, err := c.httpClient.Get(c.baseURL + "/health")
