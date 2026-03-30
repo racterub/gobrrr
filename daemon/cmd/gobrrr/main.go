@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -575,6 +576,124 @@ var memoryDeleteCmd = &cobra.Command{
 	},
 }
 
+// --- session ---
+
+var sessionCmd = &cobra.Command{
+	Use:   "session",
+	Short: "Manage the Telegram channel session",
+}
+
+var sessionStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show session status",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		status, err := c.SessionStatus()
+		if err != nil {
+			return err
+		}
+		data, _ := json.MarshalIndent(status, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	},
+}
+
+var sessionStartCmd = &cobra.Command{
+	Use:   "start",
+	Short: "Start the Telegram session",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		if err := c.SessionStart(); err != nil {
+			return err
+		}
+		fmt.Println("Session starting")
+		return nil
+	},
+}
+
+var sessionStopCmd = &cobra.Command{
+	Use:   "stop",
+	Short: "Stop the Telegram session",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		if err := c.SessionStop(); err != nil {
+			return err
+		}
+		fmt.Println("Session stopped")
+		return nil
+	},
+}
+
+var sessionRestartCmd = &cobra.Command{
+	Use:   "restart",
+	Short: "Restart the Telegram session",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		if err := c.SessionRestart(); err != nil {
+			return err
+		}
+		fmt.Println("Session restarting")
+		return nil
+	},
+}
+
+// --- timer ---
+
+var timerCmd = &cobra.Command{
+	Use:   "timer",
+	Short: "Manage scheduled tasks",
+}
+
+var timerCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a recurring scheduled task",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
+		cronExpr, _ := cmd.Flags().GetString("cron")
+		prompt, _ := cmd.Flags().GetString("prompt")
+		replyTo, _ := cmd.Flags().GetString("reply-to")
+		allowWrites, _ := cmd.Flags().GetBool("allow-writes")
+
+		c := newClient()
+		result, err := c.CreateSchedule(name, cronExpr, prompt, replyTo, allowWrites)
+		if err != nil {
+			return err
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	},
+}
+
+var timerListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all scheduled tasks",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := newClient()
+		schedules, err := c.ListSchedules()
+		if err != nil {
+			return err
+		}
+		data, _ := json.MarshalIndent(schedules, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	},
+}
+
+var timerRemoveCmd = &cobra.Command{
+	Use:   "remove",
+	Short: "Remove a scheduled task",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
+		c := newClient()
+		if err := c.RemoveSchedule(name); err != nil {
+			return err
+		}
+		fmt.Printf("Removed schedule %q\n", name)
+		return nil
+	},
+}
+
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Run first-time setup wizard",
@@ -665,6 +784,24 @@ func init() {
 
 	setupGoogleAccountCmd.Flags().StringVar(&setupGoogleAccountName, "name", "", "Account label (e.g. personal, work)")
 	setupCmd.AddCommand(setupGoogleAccountCmd)
+
+	sessionCmd.AddCommand(sessionStatusCmd, sessionStartCmd, sessionStopCmd, sessionRestartCmd)
+	rootCmd.AddCommand(sessionCmd)
+
+	timerCreateCmd.Flags().String("name", "", "Schedule name (required)")
+	timerCreateCmd.Flags().String("cron", "", "Cron expression (required)")
+	timerCreateCmd.Flags().String("prompt", "", "Task prompt (required)")
+	timerCreateCmd.Flags().String("reply-to", "telegram", "Result destination")
+	timerCreateCmd.Flags().Bool("allow-writes", false, "Allow write operations")
+	timerCreateCmd.MarkFlagRequired("name")
+	timerCreateCmd.MarkFlagRequired("cron")
+	timerCreateCmd.MarkFlagRequired("prompt")
+
+	timerRemoveCmd.Flags().String("name", "", "Schedule name (required)")
+	timerRemoveCmd.MarkFlagRequired("name")
+
+	timerCmd.AddCommand(timerCreateCmd, timerListCmd, timerRemoveCmd)
+	rootCmd.AddCommand(timerCmd)
 
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(submitCmd)
