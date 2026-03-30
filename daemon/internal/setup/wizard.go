@@ -91,6 +91,42 @@ func RunWizard() error {
 		cfg.UptimeKuma.PushURL = pushURL
 	}
 
+	// 5b. Telegram session configuration.
+	fmt.Println()
+	fmt.Println("--- Telegram Session ---")
+	fmt.Print("Enable Telegram channel session? [y/N]: ")
+	if input := readLine(reader); strings.ToLower(input) == "y" {
+		cfg.TelegramSession.Enabled = true
+
+		fmt.Printf("Memory ceiling (MB) [%d]: ", cfg.TelegramSession.MemoryCeilingMB)
+		if input := readLine(reader); input != "" {
+			if v, err := strconv.Atoi(input); err == nil {
+				cfg.TelegramSession.MemoryCeilingMB = v
+			}
+		}
+
+		fmt.Printf("Max uptime (hours) [%d]: ", cfg.TelegramSession.MaxUptimeHours)
+		if input := readLine(reader); input != "" {
+			if v, err := strconv.Atoi(input); err == nil {
+				cfg.TelegramSession.MaxUptimeHours = v
+			}
+		}
+
+		fmt.Printf("Idle threshold (minutes) [%d]: ", cfg.TelegramSession.IdleThresholdMin)
+		if input := readLine(reader); input != "" {
+			if v, err := strconv.Atoi(input); err == nil {
+				cfg.TelegramSession.IdleThresholdMin = v
+			}
+		}
+
+		fmt.Print("Channels [plugin:telegram@claude-plugins-official]: ")
+		if input := readLine(reader); input != "" {
+			cfg.TelegramSession.Channels = []string{input}
+		} else {
+			cfg.TelegramSession.Channels = []string{"plugin:telegram@claude-plugins-official"}
+		}
+	}
+
 	// 6. Write config.json.
 	configPath := filepath.Join(gobrrDir, "config.json")
 	if writeErr := writeJSON(configPath, cfg); writeErr != nil {
@@ -137,9 +173,9 @@ func RunWizard() error {
 
 	// 10. Optionally install systemd unit.
 	fmt.Println()
-	fmt.Print("Install systemd user service? [y/N]: ")
+	fmt.Print("Install systemd service (requires sudo)? [y/N]: ")
 	if strings.ToLower(readLine(reader)) == "y" {
-		if svcErr := installSystemdUnit(gobrrDir); svcErr != nil {
+		if svcErr := installSystemdUnit(); svcErr != nil {
 			fmt.Printf("Warning: could not install systemd unit: %v\n", svcErr)
 		}
 	}
@@ -147,7 +183,7 @@ func RunWizard() error {
 	fmt.Println()
 	fmt.Println("=== Setup complete! ===")
 	fmt.Println("Start the daemon: gobrrr daemon start")
-	fmt.Println("Or via systemd:   systemctl --user start gobrrr")
+	fmt.Println("Or via systemd:   sudo systemctl start gobrrr")
 
 	return nil
 }
@@ -229,46 +265,15 @@ func completeGoogleAccountSetup(reader *bufio.Reader, gobrrDir string, v *vault.
 }
 
 // installSystemdUnit copies the bundled gobrrr.service to
-// ~/.config/systemd/user/ and enables it.
-func installSystemdUnit(gobrrDir string) error {
-	// Locate the service file next to the binary or in the repo.
-	// We look for it relative to the executable first, then fall back to a
-	// hard-coded relative path used during development.
-	svcContent := defaultServiceUnit
-
-	// Ensure target directory exists.
-	systemdUserDir := filepath.Join(mustHomeDir(), ".config", "systemd", "user")
-	if err := os.MkdirAll(systemdUserDir, 0755); err != nil {
-		return fmt.Errorf("creating systemd user dir: %w", err)
+// /etc/systemd/system/ and enables it (requires root).
+func installSystemdUnit() error {
+	unitPath := "/etc/systemd/system/gobrrr.service"
+	if err := os.WriteFile(unitPath, []byte(defaultServiceUnit), 0644); err != nil {
+		return fmt.Errorf("writing %s (try running with sudo): %w", unitPath, err)
 	}
-
-	destPath := filepath.Join(systemdUserDir, "gobrrr.service")
-	if err := os.WriteFile(destPath, []byte(svcContent), 0644); err != nil {
-		return fmt.Errorf("writing service file: %w", err)
-	}
-	fmt.Printf("Service file written to %s\n", destPath)
-
-	// Reload and enable.
-	for _, args := range [][]string{
-		{"--user", "daemon-reload"},
-		{"--user", "enable", "gobrrr"},
-	} {
-		out, err := exec.Command("systemctl", args...).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("systemctl %s: %w\n%s", strings.Join(args, " "), err, out)
-		}
-	}
-	fmt.Println("systemd unit enabled. Start with: systemctl --user start gobrrr")
+	fmt.Printf("Service file written to %s\n", unitPath)
+	fmt.Println("Run: sudo systemctl daemon-reload && sudo systemctl enable gobrrr")
 	return nil
-}
-
-// mustHomeDir returns the home directory or panics.
-func mustHomeDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		panic(fmt.Sprintf("cannot determine home directory: %v", err))
-	}
-	return home
 }
 
 // writeJSON marshals v as indented JSON and writes it to path (0600).
