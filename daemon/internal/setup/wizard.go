@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -160,26 +159,6 @@ func RunWizard() error {
 		}
 	}
 
-	// 9. Check for agent-browser.
-	fmt.Println()
-	fmt.Println("--- Browser (agent-browser) ---")
-	if _, lookErr := exec.LookPath("agent-browser"); lookErr != nil {
-		fmt.Println("agent-browser not found. Install it for web browsing support:")
-		fmt.Println("  npm install -g @anthropic-ai/agent-browser")
-		fmt.Println("  agent-browser install --with-deps")
-	} else {
-		fmt.Println("agent-browser found.")
-	}
-
-	// 10. Optionally install systemd unit.
-	fmt.Println()
-	fmt.Print("Install systemd service (requires sudo)? [y/N]: ")
-	if strings.ToLower(readLine(reader)) == "y" {
-		if svcErr := installSystemdUnit(); svcErr != nil {
-			fmt.Printf("Warning: could not install systemd unit: %v\n", svcErr)
-		}
-	}
-
 	fmt.Println()
 	fmt.Println("=== Setup complete! ===")
 	fmt.Println("Start the daemon: gobrrr daemon start")
@@ -264,18 +243,6 @@ func completeGoogleAccountSetup(reader *bufio.Reader, gobrrDir string, v *vault.
 	return nil
 }
 
-// installSystemdUnit copies the bundled gobrrr.service to
-// /etc/systemd/system/ and enables it (requires root).
-func installSystemdUnit() error {
-	unitPath := "/etc/systemd/system/gobrrr.service"
-	if err := os.WriteFile(unitPath, []byte(defaultServiceUnit), 0644); err != nil {
-		return fmt.Errorf("writing %s (try running with sudo): %w", unitPath, err)
-	}
-	fmt.Printf("Service file written to %s\n", unitPath)
-	fmt.Println("Run: sudo systemctl daemon-reload && sudo systemctl enable gobrrr")
-	return nil
-}
-
 // writeJSON marshals v as indented JSON and writes it to path (0600).
 func writeJSON(path string, v any) error {
 	data, err := json.MarshalIndent(v, "", "    ")
@@ -291,31 +258,3 @@ func readLine(reader *bufio.Reader) string {
 	return strings.TrimSpace(line)
 }
 
-// defaultServiceUnit is the embedded systemd service file content.
-// It mirrors systemd/gobrrr.service in the repository.
-const defaultServiceUnit = `[Unit]
-Description=gobrrr task dispatch daemon
-After=network-online.target
-Wants=network-online.target
-StartLimitIntervalSec=0
-
-[Service]
-Type=notify
-User=claude-agent
-WorkingDirectory=/home/claude-agent/workspace
-Environment=HOME=/home/claude-agent
-ExecStart=/usr/local/bin/gobrrr daemon start
-Restart=on-failure
-RestartSec=5
-WatchdogSec=60
-MemoryMax=4G
-MemoryHigh=3072M
-KillMode=control-group
-TimeoutStopSec=90
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=gobrrr
-
-[Install]
-WantedBy=multi-user.target
-`
