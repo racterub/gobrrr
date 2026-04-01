@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -84,9 +85,15 @@ func RunWizard() error {
 	// 5. Uptime Kuma configuration.
 	fmt.Println()
 	fmt.Println("--- Uptime Kuma (optional) ---")
+	fmt.Println("Example: http://uptime-kuma:3001/api/push/aBcDeFgH")
 	fmt.Print("Push URL (leave empty to skip): ")
 	pushURL := readLine(reader)
 	if pushURL != "" {
+		// Strip query parameters — the heartbeat builds its own.
+		if u, err := url.Parse(pushURL); err == nil {
+			u.RawQuery = ""
+			pushURL = u.String()
+		}
 		cfg.UptimeKuma.PushURL = pushURL
 	}
 
