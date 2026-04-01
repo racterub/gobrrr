@@ -17,15 +17,33 @@ import (
 	"github.com/racterub/gobrrr/internal/config"
 )
 
-// readCgroupMemoryMB reads the cgroup MemoryCurrent in MB.
-// Returns 0 if cgroup is unavailable.
+// readCgroupMemoryMB reads the cgroup memory.current in MB.
+// It reads the service-specific cgroup via /proc/self/cgroup first,
+// falling back to the root cgroup. Returns 0 if unavailable.
 func readCgroupMemoryMB() int {
+	// Try service-specific cgroup first via /proc/self/cgroup.
+	if data, err := os.ReadFile("/proc/self/cgroup"); err == nil {
+		// cgroup v2: single line "0::/system.slice/gobrrr.service"
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "0::") {
+				rel := strings.TrimSpace(strings.TrimPrefix(line, "0::"))
+				if rel != "" && rel != "/" {
+					path := "/sys/fs/cgroup" + rel + "/memory.current"
+					if b, err := os.ReadFile(path); err == nil {
+						if v, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64); err == nil {
+							return int(v / 1024 / 1024)
+						}
+					}
+				}
+			}
+		}
+	}
+	// Fallback to root cgroup.
 	data, err := os.ReadFile("/sys/fs/cgroup/memory.current")
 	if err != nil {
 		return 0
 	}
-	s := strings.TrimSpace(string(data))
-	bytes, err := strconv.ParseInt(s, 10, 64)
+	bytes, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
 	if err != nil {
 		return 0
 	}
