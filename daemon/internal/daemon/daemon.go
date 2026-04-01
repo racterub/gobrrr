@@ -3,6 +3,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -77,9 +78,19 @@ func New(cfg *config.Config, socket string) *Daemon {
 	}
 
 	// Initialize Telegram notifier if bot token and chat ID are configured.
+	// Credentials are stored encrypted by the setup wizard; decrypt before use.
 	var notifier *telegram.Notifier
 	if cfg.Telegram.BotToken != "" && cfg.Telegram.ChatID != "" {
-		notifier = telegram.NewNotifier(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
+		v, vErr := loadVaultIfAvailable(gobrrDir)
+		if vErr == nil && v != nil {
+			tokenBytes, _ := hex.DecodeString(cfg.Telegram.BotToken)
+			chatBytes, _ := hex.DecodeString(cfg.Telegram.ChatID)
+			decToken, dErr := v.Decrypt(tokenBytes)
+			decChat, cErr := v.Decrypt(chatBytes)
+			if dErr == nil && cErr == nil {
+				notifier = telegram.NewNotifier(string(decToken), string(decChat))
+			}
+		}
 	}
 
 	// Initialize Uptime Kuma heartbeat if configured.
