@@ -9,6 +9,7 @@ Type=notify
 User=claude-agent
 WorkingDirectory=/home/claude-agent/workspace
 Environment=HOME=/home/claude-agent
+Environment=PATH=/home/claude-agent/.local/bin:/home/claude-agent/.bun/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/local/bin/gobrrr daemon start
 Restart=on-failure
 RestartSec=5
