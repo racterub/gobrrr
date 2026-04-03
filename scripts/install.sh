@@ -279,10 +279,14 @@ echo "Service installed and enabled"
 # --- Step 15: Authenticate Claude Code ---
 step "Authenticating Claude Code"
 
-echo "Claude Code requires a long-lived auth token for headless operation."
-echo "Generate one at https://claude.ai on a machine with a browser."
-echo ""
-sudo -u claude-agent -i claude setup-token
+if sudo -u claude-agent -i claude -p "exit" --max-turns 1 &>/dev/null; then
+    echo "Claude Code already authenticated"
+else
+    echo "Claude Code requires a long-lived auth token for headless operation."
+    echo "Generate one at https://claude.ai on a machine with a browser."
+    echo ""
+    sudo -u claude-agent -i claude setup-token
+fi
 
 # --- Step 16: Install Telegram plugin ---
 step "Installing Telegram plugin"
