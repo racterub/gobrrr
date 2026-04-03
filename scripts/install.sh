@@ -287,6 +287,10 @@ sudo -u claude-agent -i claude setup-token
 # --- Step 16: Install Telegram plugin ---
 step "Installing Telegram plugin"
 
+# Claude Code must be launched once after auth to initialize the plugin marketplace.
+echo "Initializing Claude Code marketplace..."
+sudo -u claude-agent -i claude -p "exit" --max-turns 1 &>/dev/null || true
+
 if sudo -u claude-agent -i claude plugins installed 2>/dev/null | grep -q "telegram@claude-plugins-official"; then
     echo "Telegram plugin already installed"
 else
