@@ -6,7 +6,7 @@ set -euo pipefail
 # Requires: root (self-elevates)
 # Idempotent: safe to re-run for upgrades
 
-TOTAL_STEPS=17
+TOTAL_STEPS=19
 CURRENT_STEP=0
 
 trap 'echo ""; echo "FAILED at step [${CURRENT_STEP:-0}/${TOTAL_STEPS:-17}]"; echo "Check the output above for details."; exit 1' ERR
@@ -135,8 +135,13 @@ fi
 step "Installing Bun"
 
 if ! command -v bun &>/dev/null; then
-    npm install -g bun
-    echo "Installed: bun $(bun --version)"
+    sudo -u claude-agent -i bash -c 'curl -fsSL https://bun.sh/install | bash'
+    # Symlink to system PATH
+    BUN_BIN="/home/claude-agent/.bun/bin/bun"
+    if [ -f "$BUN_BIN" ] && [ ! -f /usr/local/bin/bun ]; then
+        ln -sf "$BUN_BIN" /usr/local/bin/bun
+    fi
+    echo "Installed: bun $(sudo -u claude-agent -i bun --version)"
 else
     echo "Bun already installed: $(bun --version)"
 fi
@@ -275,12 +280,100 @@ echo "Generate one at https://claude.ai on a machine with a browser."
 echo ""
 sudo -u claude-agent -i claude setup-token
 
-# --- Step 16: Run gobrrr setup ---
+# --- Step 16: Install Telegram plugin ---
+step "Installing Telegram plugin"
+
+if sudo -u claude-agent -i claude plugins installed 2>/dev/null | grep -q "telegram@claude-plugins-official"; then
+    echo "Telegram plugin already installed"
+else
+    sudo -u claude-agent -i claude plugins install telegram@claude-plugins-official
+    echo "Installed Telegram plugin"
+fi
+
+# --- Step 17: Configure Claude Code settings ---
+step "Configuring Claude Code settings"
+
+CLAUDE_SETTINGS="/home/claude-agent/.claude/settings.json"
+mkdir -p /home/claude-agent/.claude
+cat > "${CLAUDE_SETTINGS}.tmp" << 'SETTINGS'
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Agent",
+      "Skill",
+      "WebFetch",
+      "WebSearch",
+      "Bash(git *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(wc *)",
+      "Bash(jq *)",
+      "Bash(mkdir *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(touch *)",
+      "Bash(echo *)",
+      "Bash(date *)",
+      "Bash(diff *)",
+      "Bash(sort *)",
+      "Bash(uniq *)",
+      "Bash(sed *)",
+      "Bash(awk *)",
+      "Bash(tee *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(python3 *)",
+      "Bash(node *)",
+      "Bash(bun *)",
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(claude *)",
+      "Bash(gobrrr *)",
+      "mcp__claude_ai_Gmail__*",
+      "mcp__claude_ai_Google_Calendar__*",
+      "mcp__plugin_telegram_telegram__*",
+      "mcp__context7__*"
+    ],
+    "deny": [
+      "Bash(sudo *)",
+      "Bash(su *)",
+      "Bash(apt *)",
+      "Bash(dpkg *)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~/*)",
+      "Bash(dd *)",
+      "Bash(mkfs *)",
+      "Bash(reboot *)",
+      "Bash(shutdown *)",
+      "Bash(passwd *)",
+      "Bash(chmod 777 *)"
+    ]
+  },
+  "enabledPlugins": {
+    "telegram@claude-plugins-official": true
+  },
+  "skipDangerousModePermissionPrompt": true
+}
+SETTINGS
+mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
+chown claude-agent:claude-agent "$CLAUDE_SETTINGS"
+echo "Settings configured"
+
+# --- Step 18: Run gobrrr setup ---
 step "Running gobrrr setup wizard"
 
 sudo -u claude-agent -i gobrrr setup
 
-# --- Step 17: Start service ---
+# --- Step 19: Start service ---
 step "Starting gobrrr service"
 
 if systemctl is-active --quiet gobrrr; then
@@ -290,7 +383,7 @@ else
     systemctl start gobrrr
 fi
 
-# --- Step 18: Verify ---
+# --- Verify ---
 step "Verifying installation"
 
 sleep 2  # Give daemon a moment to start
