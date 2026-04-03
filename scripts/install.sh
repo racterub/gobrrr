@@ -184,8 +184,8 @@ step "Installing agent-browser"
 if command -v agent-browser &>/dev/null; then
     echo "agent-browser already installed"
 else
-    npm install -g @anthropic-ai/agent-browser
-    echo "Installing Chrome for Testing..."
+    npm install -g agent-browser
+    echo "Installing Chrome for Testing and system dependencies..."
     agent-browser install --with-deps
     echo "Installed agent-browser"
 fi
