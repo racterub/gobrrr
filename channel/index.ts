@@ -25,6 +25,8 @@ const mcp = new Server(
 await mcp.connect(new StdioServerTransport());
 
 function connectToStream(attempt: number = 0) {
+  let reconnecting = false;
+
   const socket = createConnection(SOCKET_PATH, () => {
     // Send HTTP request over Unix socket
     socket.write(
@@ -68,13 +70,15 @@ function connectToStream(attempt: number = 0) {
     }
   });
 
-  socket.on("error", () => {
+  function handleDisconnect() {
+    if (reconnecting) return;
+    reconnecting = true;
+    socket.destroy();
     scheduleReconnect(attempt);
-  });
+  }
 
-  socket.on("close", () => {
-    scheduleReconnect(attempt);
-  });
+  socket.on("error", handleDisconnect);
+  socket.on("close", handleDisconnect);
 }
 
 function scheduleReconnect(attempt: number) {
