@@ -297,32 +297,47 @@ func (m *Manager) monitorLoop(ctx context.Context, cmd *exec.Cmd, exited <-chan 
 	}
 }
 
-// killProcess sends SIGTERM, waits 60s, then SIGKILL.
+// killProcess sends SIGTERM, then SIGKILL after 60s if still alive.
+// It does NOT call cmd.Wait() — the caller (runOnce) is responsible for reaping.
 func (m *Manager) killProcess(cmd *exec.Cmd) {
 	if cmd.Process == nil {
 		return
 	}
 	_ = cmd.Process.Signal(syscall.SIGTERM)
-	done := make(chan struct{})
 	go func() {
-		cmd.Wait()
-		close(done)
+		time.Sleep(60 * time.Second)
+		// If process is still alive, escalate to SIGKILL.
+		if cmd.ProcessState == nil {
+			_ = cmd.Process.Signal(syscall.SIGKILL)
+		}
 	}()
-	select {
-	case <-done:
-	case <-time.After(60 * time.Second):
-		_ = cmd.Process.Signal(syscall.SIGKILL)
-	}
 }
 
-// Stop gracefully stops the current session.
+// Stop gracefully stops the current session and waits for it to exit.
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	cmd := m.cmd
 	m.mu.Unlock()
 
-	if cmd != nil && cmd.Process != nil {
-		m.killProcess(cmd)
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	m.killProcess(cmd)
+
+	// Wait for runOnce to finish reaping the process.
+	deadline := time.After(90 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			return
+		case <-time.After(200 * time.Millisecond):
+			m.mu.Lock()
+			still := m.running
+			m.mu.Unlock()
+			if !still {
+				return
+			}
+		}
 	}
 }
 
