@@ -131,22 +131,7 @@ else
     echo "Node.js already installed: $(node --version)"
 fi
 
-# --- Step 6: Install Bun ---
-step "Installing Bun"
-
-if ! command -v bun &>/dev/null; then
-    sudo -u claude-agent -i bash -c 'curl -fsSL https://bun.sh/install | bash'
-    # Symlink to system PATH
-    BUN_BIN="/home/claude-agent/.bun/bin/bun"
-    if [ -f "$BUN_BIN" ] && [ ! -f /usr/local/bin/bun ]; then
-        ln -sf "$BUN_BIN" /usr/local/bin/bun
-    fi
-    echo "Installed: bun $(sudo -u claude-agent -i bun --version)"
-else
-    echo "Bun already installed: $(bun --version)"
-fi
-
-# --- Step 7: Create claude-agent user ---
+# --- Step 6: Create claude-agent user ---
 step "Creating claude-agent user"
 
 if id claude-agent &>/dev/null; then
@@ -162,6 +147,21 @@ fi
 
 mkdir -p /home/claude-agent/workspace
 chown claude-agent:claude-agent /home/claude-agent/workspace
+
+# --- Step 7: Install Bun ---
+step "Installing Bun"
+
+if ! command -v bun &>/dev/null; then
+    sudo -u claude-agent -i bash -c 'curl -fsSL https://bun.sh/install | bash'
+    # Symlink to system PATH
+    BUN_BIN="/home/claude-agent/.bun/bin/bun"
+    if [ -f "$BUN_BIN" ] && [ ! -f /usr/local/bin/bun ]; then
+        ln -sf "$BUN_BIN" /usr/local/bin/bun
+    fi
+    echo "Installed: bun $(sudo -u claude-agent -i bun --version)"
+else
+    echo "Bun already installed: $(bun --version)"
+fi
 
 # --- Step 8: Install Claude Code ---
 step "Installing Claude Code"
