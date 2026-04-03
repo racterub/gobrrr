@@ -196,9 +196,13 @@ step "Setting up gobrrr source"
 REPO_DIR="/home/claude-agent/gobrrr"
 
 if [ -d "$REPO_DIR/.git" ]; then
-    echo "Updating existing repo..."
-    git -C "$REPO_DIR" fetch origin
-    git -C "$REPO_DIR" reset --hard origin/main
+    if git -C "$REPO_DIR" remote get-url origin &>/dev/null; then
+        echo "Updating existing repo..."
+        git -C "$REPO_DIR" fetch origin
+        git -C "$REPO_DIR" reset --hard origin/main
+    else
+        echo "Repo exists (no remote configured, skipping update)"
+    fi
 else
     echo "Cloning gobrrr..."
     git clone https://github.com/racterub/gobrrr.git "$REPO_DIR"
