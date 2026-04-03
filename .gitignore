@@ -1,4 +1,5 @@
 /gobrrr
+daemon/gobrrr
 *.exe
 .gobrrr/
 vendor/
