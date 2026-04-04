@@ -244,33 +244,7 @@ chown claude-agent:claude-agent "$MCP_FILE"
 # --- Step 14: Install systemd unit ---
 step "Installing systemd service"
 
-cat > /etc/systemd/system/gobrrr.service << 'UNIT'
-[Unit]
-Description=gobrrr task dispatch daemon
-After=network-online.target
-Wants=network-online.target
-StartLimitIntervalSec=0
-
-[Service]
-Type=notify
-User=claude-agent
-WorkingDirectory=/home/claude-agent/workspace
-Environment=HOME=/home/claude-agent
-ExecStart=/usr/local/bin/gobrrr daemon start
-Restart=on-failure
-RestartSec=5
-WatchdogSec=60
-MemoryMax=4G
-MemoryHigh=3072M
-KillMode=control-group
-TimeoutStopSec=90
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=gobrrr
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+cp "$REPO_DIR/daemon/systemd/gobrrr.service" /etc/systemd/system/gobrrr.service
 
 systemctl daemon-reload
 systemctl enable gobrrr
