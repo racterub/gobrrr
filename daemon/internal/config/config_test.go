@@ -87,6 +87,13 @@ func TestDefaultTelegramSessionConfig(t *testing.T) {
 	assert.Equal(t, 6, cfg.TelegramSession.MaxRestartAttempts)
 }
 
+func TestDefaultWorkspacePath(t *testing.T) {
+	cfg := config.Default()
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "workspace"), cfg.WorkspacePath)
+}
+
 func TestLoadConfigPreservesTelegramSessionDefaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

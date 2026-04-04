@@ -44,6 +44,17 @@ type Config struct {
 	TelegramSession   TelegramSessionConfig `json:"telegram_session"`
 }
 
+// defaultWorkspacePath returns ~/workspace as the default working directory
+// for Claude sessions. This must be a directory already trusted by Claude Code
+// to avoid the interactive "trust this folder" prompt in headless mode.
+func defaultWorkspacePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "workspace"
+	}
+	return filepath.Join(home, "workspace")
+}
+
 // Default returns a Config populated with sane defaults.
 func Default() *Config {
 	return &Config{
@@ -53,7 +64,7 @@ func Default() *Config {
 		SpawnIntervalSec:  5,
 		LogRetentionDays:  7,
 		SocketPath:        filepath.Join(GobrrDir(), "gobrrr.sock"),
-		WorkspacePath:     filepath.Join(GobrrDir(), "workspace"),
+		WorkspacePath:     defaultWorkspacePath(),
 		UptimeKuma: UptimeKumaConfig{
 			IntervalSec: 60,
 		},

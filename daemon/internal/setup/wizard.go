@@ -31,7 +31,7 @@ func RunWizard() error {
 
 	// 1. Create directory structure.
 	fmt.Printf("Creating %s...\n", gobrrDir)
-	for _, sub := range []string{"", "logs", "workspace", "workers", "output", "memory", "google"} {
+	for _, sub := range []string{"", "logs", "workers", "output", "memory", "google"} {
 		dir := filepath.Join(gobrrDir, sub)
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return fmt.Errorf("creating directory %s: %w", dir, err)
