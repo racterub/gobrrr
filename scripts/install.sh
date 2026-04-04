@@ -6,7 +6,7 @@ set -euo pipefail
 # Requires: root (self-elevates)
 # Idempotent: safe to re-run for upgrades
 
-TOTAL_STEPS=19
+TOTAL_STEPS=20
 CURRENT_STEP=0
 
 trap 'echo ""; echo "FAILED at step [${CURRENT_STEP:-0}/${TOTAL_STEPS:-17}]"; echo "Check the output above for details."; exit 1' ERR
@@ -354,12 +354,20 @@ mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
 chown claude-agent:claude-agent "$CLAUDE_SETTINGS"
 echo "Settings configured"
 
-# --- Step 18: Run gobrrr setup ---
+# --- Step 18: Pre-trust workspace directory ---
+step "Pre-trusting workspace for Claude Code"
+
+TRUST_DIR="/home/claude-agent/.claude/projects/-home-claude-agent-workspace"
+mkdir -p "$TRUST_DIR"
+chown -R claude-agent:claude-agent /home/claude-agent/.claude/projects
+echo "Workspace /home/claude-agent/workspace trusted"
+
+# --- Step 19: Run gobrrr setup ---
 step "Running gobrrr setup wizard"
 
 sudo -u claude-agent -i gobrrr setup
 
-# --- Step 19: Start service ---
+# --- Step 20: Start service ---
 step "Starting gobrrr service"
 
 if systemctl is-active --quiet gobrrr; then
