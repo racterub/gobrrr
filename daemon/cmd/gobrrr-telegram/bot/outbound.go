@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -64,6 +65,23 @@ func (w *Bot) React(ctx context.Context, chatID int64, messageID int, emoji stri
 		Reaction:  reactions,
 	})
 	return err
+}
+
+// SendDocument sends a local file as a Telegram document.
+func (w *Bot) SendDocument(ctx context.Context, chatID int64, path string) (int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	m, err := w.Inner().SendDocument(ctx, &tgbot.SendDocumentParams{
+		ChatID:   chatID,
+		Document: &models.InputFileUpload{Filename: filepath.Base(path), Data: f},
+	})
+	if err != nil {
+		return 0, err
+	}
+	return m.ID, nil
 }
 
 func (r reactParams) to() *tgbot.SetMessageReactionParams {

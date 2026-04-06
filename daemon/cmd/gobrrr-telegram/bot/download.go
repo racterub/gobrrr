@@ -60,3 +60,31 @@ func (w *Bot) maybeDownload(ctx context.Context, msg *models.Message) (string, s
 	}
 	return out, fileID, nil
 }
+
+// DownloadByFileID fetches a Telegram file by its file_id into inbox/.
+func (w *Bot) DownloadByFileID(ctx context.Context, fileID string) (string, error) {
+	f, err := w.Inner().GetFile(ctx, &tgbot.GetFileParams{FileID: fileID})
+	if err != nil {
+		return "", err
+	}
+	url := w.Inner().FileDownloadLink(f)
+	inbox := filepath.Join(w.stateDir, "inbox")
+	if err := os.MkdirAll(inbox, 0700); err != nil {
+		return "", err
+	}
+	out := filepath.Join(inbox, "download-"+fileID)
+	resp, err := http.Get(url) //nolint:noctx
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	fp, err := os.OpenFile(out, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return "", err
+	}
+	defer fp.Close()
+	if _, err := io.Copy(fp, resp.Body); err != nil {
+		return "", err
+	}
+	return out, nil
+}
