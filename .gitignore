@@ -1,5 +1,7 @@
 /gobrrr
 daemon/gobrrr
+daemon/gobrrr-telegram
+plugins/gobrrr-telegram/gobrrr-telegram
 *.exe
 .gobrrr/
 vendor/

@@ -24,6 +24,9 @@ func New(b *bot.Bot, store *access.Store, stateDir string) *Server {
 		"0.0.1",
 		server.WithInstructions(
 			`The sender reads Telegram, not this session. Anything you want them to see must go through the reply tool. Messages arrive as <channel source="telegram" chat_id="..." message_id="..." user="..." ts="...">.`),
+		server.WithExperimental(map[string]any{
+			"claude/channel": map[string]any{},
+		}),
 	)
 	srv := &Server{s: s, b: b, store: store, stateDir: stateDir}
 	srv.registerTools()

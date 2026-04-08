@@ -3,14 +3,14 @@ package mcpserver
 import (
 	"context"
 	"fmt"
-	"html"
 	"time"
 
 	"github.com/go-telegram/bot/models"
 )
 
-// EmitInbound builds the <channel> tag and sends a notifications/claude/channel
-// to the connected MCP client.
+// EmitInbound sends a notifications/claude/channel to the connected MCP client.
+// Claude Code constructs the <channel> tag itself from `meta`; we send the
+// raw message text as `content`, matching the official telegram plugin.
 func (s *Server) EmitInbound(ctx context.Context, upd *models.Update, attachPath, attachFileID string) {
 	msg := upd.Message
 	if msg == nil {
@@ -21,29 +21,27 @@ func (s *Server) EmitInbound(ctx context.Context, upd *models.Update, attachPath
 	if user == "" {
 		user = msg.From.FirstName
 	}
-	attrs := fmt.Sprintf(
-		`source="telegram" chat_id="%d" message_id="%d" user=%q ts=%q`,
-		msg.Chat.ID, msg.ID, user, ts,
-	)
-	if attachPath != "" && msg.Photo != nil {
-		attrs += fmt.Sprintf(` image_path=%q`, attachPath)
-	} else if attachFileID != "" {
-		attrs += fmt.Sprintf(` attachment_file_id=%q`, attachFileID)
-	}
 	body := msg.Text
 	if body == "" && msg.Caption != "" {
 		body = msg.Caption
 	}
-	content := fmt.Sprintf("<channel %s>\n%s\n</channel>", attrs, html.EscapeString(body))
+
+	meta := map[string]any{
+		"chat_id":    fmt.Sprintf("%d", msg.Chat.ID),
+		"message_id": fmt.Sprintf("%d", msg.ID),
+		"user":       user,
+		"user_id":    fmt.Sprintf("%d", msg.From.ID),
+		"ts":         ts,
+	}
+	if attachPath != "" && msg.Photo != nil {
+		meta["image_path"] = attachPath
+	} else if attachFileID != "" {
+		meta["attachment_file_id"] = attachFileID
+	}
 
 	params := map[string]any{
-		"content": content,
-		"meta": map[string]any{
-			"chat_id":    fmt.Sprintf("%d", msg.Chat.ID),
-			"message_id": msg.ID,
-			"user":       user,
-			"ts":         ts,
-		},
+		"content": body,
+		"meta":    meta,
 	}
 	s.s.SendNotificationToAllClients("notifications/claude/channel", params)
 }
