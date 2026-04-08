@@ -1,0 +1,110 @@
+package bot
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strconv"
+	"time"
+
+	tgbot "github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
+
+	"github.com/racterub/gobrrr/cmd/gobrrr-telegram/access"
+	"github.com/racterub/gobrrr/cmd/gobrrr-telegram/permission"
+)
+
+const pairingTTL = 10 * time.Minute
+
+func (w *Bot) handleUpdate(ctx context.Context, inner *tgbot.Bot, upd *models.Update) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "gobrrr-telegram: panic in handleUpdate: %v\n", r)
+		}
+	}()
+	if upd.Message == nil {
+		return
+	}
+	msg := upd.Message
+	chatID := ChatIDToString(msg.Chat.ID)
+	userID := ChatIDToString(msg.From.ID)
+	isGroup := msg.Chat.Type == models.ChatTypeGroup || msg.Chat.Type == models.ChatTypeSupergroup
+
+	a, err := w.store.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gobrrr-telegram: load access: %v\n", err)
+		return
+	}
+
+	decision := access.Check(a, chatID, userID, isGroup, msg.Text, w.username)
+
+	switch decision {
+	case access.Drop:
+		return
+	case access.NeedPair:
+		w.handlePairing(ctx, &a, chatID, userID, msg)
+		return
+	case access.Allow:
+		// fall through to delivery
+	}
+
+	attachPath, attachFileID, _ := w.maybeDownload(ctx, msg)
+	if w.onInbound != nil {
+		w.onInbound(ctx, upd, attachPath, attachFileID)
+	}
+	// ackReaction
+	if a.AckReaction != nil && *a.AckReaction != "" {
+		_, _ = w.Inner().SetMessageReaction(ctx, (&reactParams{
+			chatID:    msg.Chat.ID,
+			messageID: msg.ID,
+			emoji:     *a.AckReaction,
+		}).to())
+	}
+}
+
+func (w *Bot) handlePairing(ctx context.Context, a *access.Access, chatID, userID string, msg *models.Message) {
+	// Reply matches existing pending code? Approve.
+	if ok, yes, code := permission.Match(msg.Text); ok {
+		if p, found := a.Pending[code]; found && p.SenderID == userID {
+			delete(a.Pending, code)
+			if yes {
+				a.AllowFrom = append(a.AllowFrom, chatID)
+				_ = w.store.Save(*a)
+				w.sendText(ctx, msg.Chat.ID, 0, "paired ✓")
+			} else {
+				_ = w.store.Save(*a)
+				w.sendText(ctx, msg.Chat.ID, 0, "pairing declined")
+			}
+			return
+		}
+	}
+	// Issue new code.
+	access.PruneExpired(a)
+	code := access.NewPairingCode()
+	now := time.Now()
+	a.Pending[code] = access.Pending{
+		SenderID:  userID,
+		ChatID:    chatID,
+		CreatedAt: now.UnixMilli(),
+		ExpiresAt: now.Add(pairingTTL).UnixMilli(),
+	}
+	if err := w.store.Save(*a); err != nil {
+		fmt.Fprintf(os.Stderr, "gobrrr-telegram: save pairing: %v\n", err)
+		return
+	}
+	w.sendText(ctx, msg.Chat.ID,
+		msg.ID,
+		fmt.Sprintf("pairing code: %s\nask the operator to reply `y %s` in this chat to approve, or `n %s` to decline. expires in %s.",
+			code, code, code, pairingTTL))
+}
+
+// reactParams is a tiny shim so the call site reads nicely; we build the
+// real go-telegram/bot request in .to().
+type reactParams struct {
+	chatID    int64
+	messageID int
+	emoji     string
+}
+
+// to is defined in outbound.go (shares the go-telegram/bot types).
+var _ = strconv.Itoa // keep import
