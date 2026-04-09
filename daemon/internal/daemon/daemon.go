@@ -65,7 +65,7 @@ func New(cfg *config.Config, socket string) *Daemon {
 	spawnInterval := time.Duration(cfg.SpawnIntervalSec) * time.Second
 	memDir := filepath.Join(gobrrDir, "memory")
 	ms := memory.NewStore(memDir)
-	wp := NewWorkerPool(q, cfg.MaxWorkers, spawnInterval, gobrrDir, ms)
+	wp := NewWorkerPool(q, cfg, cfg.MaxWorkers, spawnInterval, gobrrDir, ms)
 
 	// Initialize AccountManager if the google directory exists and is accessible.
 	var acctMgr *google.AccountManager

@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/racterub/gobrrr/internal/config"
 )
 
 func TestWorkerCapturesOutput(t *testing.T) {
@@ -62,7 +64,7 @@ func TestWorkerPoolConcurrencyLimit(t *testing.T) {
 	q := NewQueue(queuePath)
 
 	// Use sleep long enough that the pool will be at max concurrency while we poll.
-	pool := NewWorkerPool(q, 2, 0, dir, nil)
+	pool := NewWorkerPool(q, &config.Config{WorkspacePath: dir}, 2, 0, dir, nil)
 	pool.buildCommand = func(task *Task) *WorkerConfig {
 		return &WorkerConfig{
 			Command:    "sleep",
@@ -129,7 +131,7 @@ func TestWorkerPoolTaskResultStored(t *testing.T) {
 	queuePath := filepath.Join(dir, "queue.json")
 	q := NewQueue(queuePath)
 
-	pool := NewWorkerPool(q, 2, 0, dir, nil)
+	pool := NewWorkerPool(q, &config.Config{WorkspacePath: dir}, 2, 0, dir, nil)
 	pool.buildCommand = func(task *Task) *WorkerConfig {
 		return &WorkerConfig{
 			Command:    "echo",
@@ -174,4 +176,34 @@ func TestWorkerPoolTaskResultStored(t *testing.T) {
 	logPath := filepath.Join(dir, taskID+".log")
 	_, statErr := os.Stat(logPath)
 	assert.NoError(t, statErr, "log file should exist")
+}
+
+// TestDefaultBuildCommandUsesWorkspacePath verifies that workers run with CWD
+// set to the configured workspace path, not the gobrrr data directory.
+func TestDefaultBuildCommandUsesWorkspacePath(t *testing.T) {
+	gobrrDir := t.TempDir()
+	workspace := t.TempDir()
+
+	qPath := filepath.Join(gobrrDir, "queue.json")
+	q := NewQueue(qPath)
+	pool := NewWorkerPool(q, &config.Config{WorkspacePath: workspace}, 1, 0, gobrrDir, nil)
+
+	cfg := pool.defaultBuildCommand(&Task{ID: "t_1", Prompt: "hi", TimeoutSec: 5})
+	assert.Equal(t, workspace, cfg.WorkDir, "worker CWD should be the configured workspace path")
+	assert.NotEqual(t, gobrrDir, cfg.WorkDir, "worker CWD should not be the gobrrr data directory")
+}
+
+// TestNewWorkerPoolCreatesWorkspace verifies the workspace directory is
+// created on pool construction if missing.
+func TestNewWorkerPoolCreatesWorkspace(t *testing.T) {
+	gobrrDir := t.TempDir()
+	workspace := filepath.Join(gobrrDir, "nested", "workspace")
+
+	qPath := filepath.Join(gobrrDir, "queue.json")
+	q := NewQueue(qPath)
+	_ = NewWorkerPool(q, &config.Config{WorkspacePath: workspace}, 1, 0, gobrrDir, nil)
+
+	info, err := os.Stat(workspace)
+	require.NoError(t, err, "workspace directory should be created")
+	assert.True(t, info.IsDir())
 }

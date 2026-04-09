@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/racterub/gobrrr/internal/config"
 	"github.com/racterub/gobrrr/internal/identity"
 	"github.com/racterub/gobrrr/internal/memory"
 	"github.com/racterub/gobrrr/internal/security"
@@ -131,6 +132,7 @@ type WorkerPool struct {
 	spawnInterval time.Duration
 	lastSpawn     time.Time
 	queue         *Queue
+	cfg           *config.Config
 	gobrrDir      string
 	memStore      *memory.Store
 	buildCommand  func(task *Task) *WorkerConfig
@@ -140,11 +142,19 @@ type WorkerPool struct {
 
 // NewWorkerPool creates a new WorkerPool. spawnInterval is the minimum duration
 // between spawning successive workers. Pass 0 for no rate limiting.
-func NewWorkerPool(queue *Queue, maxWorkers int, spawnInterval time.Duration, gobrrDir string, ms *memory.Store) *WorkerPool {
+//
+// cfg provides the workspace path used as the worker CWD. The workspace
+// directory is created if missing so worker spawns never fail on a stale
+// config pointing at a non-existent path.
+func NewWorkerPool(queue *Queue, cfg *config.Config, maxWorkers int, spawnInterval time.Duration, gobrrDir string, ms *memory.Store) *WorkerPool {
+	if cfg != nil && cfg.WorkspacePath != "" {
+		_ = os.MkdirAll(cfg.WorkspacePath, 0o700)
+	}
 	wp := &WorkerPool{
 		maxWorkers:    maxWorkers,
 		spawnInterval: spawnInterval,
 		queue:         queue,
+		cfg:           cfg,
 		gobrrDir:      gobrrDir,
 		memStore:      ms,
 	}
@@ -175,11 +185,16 @@ func (wp *WorkerPool) defaultBuildCommand(task *Task) *WorkerConfig {
 
 	args = append(args, prompt)
 
+	workDir := wp.gobrrDir
+	if wp.cfg != nil && wp.cfg.WorkspacePath != "" {
+		workDir = wp.cfg.WorkspacePath
+	}
+
 	return &WorkerConfig{
 		Command:    "claude",
 		Args:       args,
 		TimeoutSec: task.TimeoutSec,
-		WorkDir:    wp.gobrrDir,
+		WorkDir:    workDir,
 		LogPath:    logPath,
 	}
 }

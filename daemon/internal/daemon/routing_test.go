@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/racterub/gobrrr/internal/config"
 	"github.com/racterub/gobrrr/internal/telegram"
 )
 
@@ -20,7 +21,7 @@ func newTestDaemon(t *testing.T, notifier *telegram.Notifier) *Daemon {
 	dir := t.TempDir()
 	queuePath := filepath.Join(dir, "queue.json")
 	q := NewQueue(queuePath)
-	wp := NewWorkerPool(q, 1, 0, dir, nil)
+	wp := NewWorkerPool(q, &config.Config{WorkspacePath: dir}, 1, 0, dir, nil)
 	return &Daemon{
 		gobrrDir:   dir,
 		queue:      q,
