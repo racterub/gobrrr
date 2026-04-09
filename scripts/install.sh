@@ -6,7 +6,7 @@ set -euo pipefail
 # Requires: root (self-elevates)
 # Idempotent: safe to re-run for upgrades
 
-TOTAL_STEPS=20
+TOTAL_STEPS=21
 CURRENT_STEP=0
 
 trap 'echo ""; echo "FAILED at step [${CURRENT_STEP:-0}/${TOTAL_STEPS:-17}]"; echo "Check the output above for details."; exit 1' ERR
@@ -393,7 +393,28 @@ mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
 chown claude-agent:claude-agent "$CLAUDE_SETTINGS"
 echo "Settings configured"
 
-# --- Step 18: Pre-trust workspace directory ---
+# --- Step 18: Install default identity.md and CLAUDE.md ---
+step "Installing default identity.md and CLAUDE.md"
+
+install -d -o claude-agent -g claude-agent -m 0700 /home/claude-agent/.gobrrr
+
+if [ ! -f /home/claude-agent/.gobrrr/identity.md ]; then
+    install -o claude-agent -g claude-agent -m 0644 \
+        "$REPO_DIR/identity.md.default" /home/claude-agent/.gobrrr/identity.md
+    echo "Installed default identity.md"
+else
+    echo "identity.md already exists, leaving it alone"
+fi
+
+if [ ! -f /home/claude-agent/.claude/CLAUDE.md ]; then
+    install -o claude-agent -g claude-agent -m 0644 \
+        "$REPO_DIR/claude-md.default" /home/claude-agent/.claude/CLAUDE.md
+    echo "Installed default ~/.claude/CLAUDE.md"
+else
+    echo "~/.claude/CLAUDE.md already exists, leaving it alone"
+fi
+
+# --- Step 19: Pre-trust workspace directory ---
 step "Pre-trusting workspace for Claude Code"
 
 TRUST_DIR="/home/claude-agent/.claude/projects/-home-claude-agent-workspace"
@@ -401,12 +422,12 @@ mkdir -p "$TRUST_DIR"
 chown -R claude-agent:claude-agent /home/claude-agent/.claude/projects
 echo "Workspace /home/claude-agent/workspace trusted"
 
-# --- Step 19: Run gobrrr setup ---
+# --- Step 20: Run gobrrr setup ---
 step "Running gobrrr setup wizard"
 
 sudo -u claude-agent -i gobrrr setup
 
-# --- Step 20: Start service ---
+# --- Step 21: Start service ---
 step "Starting gobrrr service"
 
 if systemctl is-active --quiet gobrrr; then

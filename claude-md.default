@@ -1,0 +1,28 @@
+# CLAUDE.md
+
+Global instructions for every `claude` invocation on this box (main
+interactive session, gobrrr workers, and any manual runs).
+
+## Tool conventions
+
+- Prefer `rg` (ripgrep) over `grep` / `find` for searching code and files.
+- Use `gh` for all GitHub operations (issues, PRs, checks, releases). Do not
+  scrape GitHub URLs with `curl` or web fetches.
+- Use `jq` for parsing and editing JSON.
+
+## Secrets hygiene
+
+- Never echo tokens, API keys, OAuth credentials, or other secrets into
+  output — they may be routed to Telegram or logs.
+- Never commit `.env`, `credentials.json`, `*.key`, or similar files.
+- Never bypass commit hooks with `--no-verify` or signing with
+  `--no-gpg-sign`.
+
+## Paths
+
+- `~/.gobrrr/` — gobrrr daemon state (config, queue, memory, logs). Treat
+  as internal; do not hand-edit while the daemon is running.
+- `~/.gobrrr/output/` — safe directory for durable worker artifacts. This is
+  where `--reply-to file:` writes land.
+- `~/.gobrrr/workspace/` — ephemeral per-task workspace. Anything here may be
+  wiped between tasks.

@@ -1,9 +1,5 @@
 # TODO
 
-## Review CLAUDE.md Files
-
-Review global `~/.claude/CLAUDE.md` and the workspace `CLAUDE.md` for this project.
-
 ## Channel Bridge Memory Leak
 
 The `channel/index.ts` Bun MCP process consumed all available memory (31GB) on the LXC. Root cause unknown.
