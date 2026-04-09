@@ -245,10 +245,12 @@ chown claude-agent:claude-agent "$MCP_FILE"
 step "Installing systemd service"
 
 cp "$REPO_DIR/daemon/systemd/gobrrr.service" /etc/systemd/system/gobrrr.service
+cp "$REPO_DIR/daemon/systemd/gobrrr-channels.service" /etc/systemd/system/gobrrr-channels.service
 
 systemctl daemon-reload
 systemctl enable gobrrr
-echo "Service installed and enabled"
+systemctl enable gobrrr-channels
+echo "Services installed and enabled"
 
 # --- Step 15: Authenticate Claude Code ---
 step "Authenticating Claude Code"
@@ -408,10 +410,17 @@ sudo -u claude-agent -i gobrrr setup
 step "Starting gobrrr service"
 
 if systemctl is-active --quiet gobrrr; then
-    echo "Service already running, restarting..."
+    echo "gobrrr already running, restarting..."
     systemctl restart gobrrr
 else
     systemctl start gobrrr
+fi
+
+if systemctl is-active --quiet gobrrr-channels; then
+    echo "gobrrr-channels already running, restarting..."
+    systemctl restart gobrrr-channels
+else
+    systemctl start gobrrr-channels
 fi
 
 # --- Verify ---
@@ -420,9 +429,15 @@ step "Verifying installation"
 sleep 2  # Give daemon a moment to start
 
 if systemctl is-active --quiet gobrrr; then
-    echo "Service is running"
+    echo "gobrrr is running"
 else
-    echo "WARNING: Service is not running. Check: journalctl -u gobrrr -n 20"
+    echo "WARNING: gobrrr is not running. Check: journalctl -u gobrrr -n 20"
+fi
+
+if systemctl is-active --quiet gobrrr-channels; then
+    echo "gobrrr-channels is running"
+else
+    echo "WARNING: gobrrr-channels is not running. Check: journalctl -u gobrrr-channels -n 20"
 fi
 
 gobrrr --version
