@@ -18,12 +18,11 @@ func TestLoadIdentity(t *testing.T) {
 	assert.Equal(t, "# Test Identity", id)
 }
 
-func TestLoadIdentityDefault(t *testing.T) {
+func TestLoadIdentityMissing(t *testing.T) {
 	dir := t.TempDir()
-	// No identity.md exists
-	id, err := identity.Load(dir)
-	require.NoError(t, err)
-	assert.Contains(t, id, "personal assistant")
+	// No identity.md exists — installer is expected to provide it.
+	_, err := identity.Load(dir)
+	require.Error(t, err)
 }
 
 func TestBuildPrompt(t *testing.T) {

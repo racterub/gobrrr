@@ -1,25 +1,18 @@
 package identity
 
 import (
-	_ "embed"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-//go:embed default.md
-var defaultIdentity string
-
-// Load reads identity.md from gobrrDir. If missing, returns embedded default.
+// Load reads identity.md from gobrrDir. The installer is responsible for
+// placing a default file; a missing file is an error.
 func Load(gobrrDir string) (string, error) {
 	path := filepath.Join(gobrrDir, "identity.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return defaultIdentity, nil
-		}
 		return "", fmt.Errorf("reading identity.md: %w", err)
 	}
 	return string(data), nil

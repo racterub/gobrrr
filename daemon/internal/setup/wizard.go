@@ -15,7 +15,6 @@ import (
 	"github.com/racterub/gobrrr/internal/config"
 	vault "github.com/racterub/gobrrr/internal/crypto"
 	"github.com/racterub/gobrrr/internal/google"
-	"github.com/racterub/gobrrr/internal/identity"
 )
 
 // RunWizard runs the interactive first-time setup wizard.
@@ -140,20 +139,7 @@ func RunWizard() error {
 	}
 	fmt.Printf("Config written to %s\n", configPath)
 
-	// 7. Copy default identity.md if absent.
-	identityPath := filepath.Join(gobrrDir, "identity.md")
-	if _, statErr := os.Stat(identityPath); os.IsNotExist(statErr) {
-		defaultContent, loadErr := identity.Load(gobrrDir)
-		if loadErr != nil {
-			return fmt.Errorf("loading default identity: %w", loadErr)
-		}
-		if writeErr := os.WriteFile(identityPath, []byte(defaultContent), 0644); writeErr != nil {
-			return fmt.Errorf("writing identity.md: %w", writeErr)
-		}
-		fmt.Println("Created default identity.md")
-	}
-
-	// 8. Google account setup loop.
+	// 7. Google account setup loop.
 	fmt.Println()
 	fmt.Println("--- Google Account Setup ---")
 	for {
