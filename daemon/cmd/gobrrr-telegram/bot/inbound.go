@@ -52,13 +52,14 @@ func (w *Bot) handleUpdate(ctx context.Context, inner *tgbot.Bot, upd *models.Up
 	if w.onInbound != nil {
 		w.onInbound(ctx, upd, attachPath, attachFileID)
 	}
-	// ackReaction
-	if a.AckReaction != nil && *a.AckReaction != "" {
-		_, _ = w.Inner().SetMessageReaction(ctx, (&reactParams{
-			chatID:    msg.Chat.ID,
-			messageID: msg.ID,
-			emoji:     *a.AckReaction,
-		}).to())
+	// Ack the inbound with a hardcoded reaction and remember it so the
+	// first subsequent reply can swap it to the "done" reaction.
+	if _, err := w.Inner().SetMessageReaction(ctx, (&reactParams{
+		chatID:    msg.Chat.ID,
+		messageID: msg.ID,
+		emoji:     AckReactionEmoji,
+	}).to()); err == nil {
+		w.setPendingAck(msg.Chat.ID, msg.ID)
 	}
 }
 

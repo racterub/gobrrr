@@ -7,11 +7,19 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"sync"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
 	"github.com/racterub/gobrrr/cmd/gobrrr-telegram/access"
+)
+
+// Hardcoded reaction emojis. Telegram only accepts a fixed set of emoji for
+// bot reactions; both of these are in the standard allowed list.
+const (
+	AckReactionEmoji  = "👀"
+	DoneReactionEmoji = "👍"
 )
 
 // InboundHandler receives a gated, already-approved message. Implementations
@@ -26,6 +34,41 @@ type Bot struct {
 	store     *access.Store
 	stateDir  string
 	onInbound InboundHandler
+
+	// pendingAck tracks the most recent ack'd inbound message per chat so
+	// that the first reply in that chat can swap the reaction to "done".
+	pendingMu  sync.Mutex
+	pendingAck map[int64]int // chatID → messageID
+}
+
+// ConsumePendingAck returns and clears the pending ack message_id for a chat,
+// if any. Used by the reply tool to swap the ack reaction to a done reaction
+// after a successful send.
+func (w *Bot) ConsumePendingAck(chatID int64) (int, bool) {
+	w.pendingMu.Lock()
+	defer w.pendingMu.Unlock()
+	mid, ok := w.pendingAck[chatID]
+	if ok {
+		delete(w.pendingAck, chatID)
+	}
+	return mid, ok
+}
+
+// ClearPendingAck drops any pending ack for a chat without swapping. Used by
+// the react tool so manual reactions win over the auto-swap.
+func (w *Bot) ClearPendingAck(chatID int64) {
+	w.pendingMu.Lock()
+	delete(w.pendingAck, chatID)
+	w.pendingMu.Unlock()
+}
+
+func (w *Bot) setPendingAck(chatID int64, messageID int) {
+	w.pendingMu.Lock()
+	if w.pendingAck == nil {
+		w.pendingAck = map[int64]int{}
+	}
+	w.pendingAck[chatID] = messageID
+	w.pendingMu.Unlock()
 }
 
 func New(token, stateDir string, store *access.Store, onInbound InboundHandler) (*Bot, error) {

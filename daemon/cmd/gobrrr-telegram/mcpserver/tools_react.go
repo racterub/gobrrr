@@ -23,6 +23,9 @@ func (s *Server) handleReact(ctx context.Context, req mcp.CallToolRequest) (*mcp
 	if err != nil {
 		return nil, err
 	}
+	// Manual react cancels the pending auto-swap: the caller is taking
+	// explicit control of reactions on this chat.
+	s.b.ClearPendingAck(chatID)
 	if err := s.b.React(ctx, chatID, int(midF), emoji); err != nil {
 		return nil, err
 	}

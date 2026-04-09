@@ -39,7 +39,6 @@ type Access struct {
 	Groups          map[string]GroupPolicy `json:"groups"`
 	Pending         map[string]Pending     `json:"pending"`
 	MentionPatterns []string               `json:"mentionPatterns,omitempty"`
-	AckReaction     *string                `json:"ackReaction,omitempty"`
 	ReplyToMode     string                 `json:"replyToMode,omitempty"` // off|first|all
 	TextChunkLimit  int                    `json:"textChunkLimit,omitempty"`
 	ChunkMode       string                 `json:"chunkMode,omitempty"` // length|newline

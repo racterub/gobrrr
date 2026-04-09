@@ -7,6 +7,9 @@ import (
 
 	mcp "github.com/mark3labs/mcp-go/mcp"
 
+	"os"
+
+	"github.com/racterub/gobrrr/cmd/gobrrr-telegram/bot"
 	"github.com/racterub/gobrrr/cmd/gobrrr-telegram/chunker"
 )
 
@@ -76,6 +79,15 @@ func (s *Server) handleReply(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		}
 		ids = append(ids, id)
 	}
+	// Swap the ack reaction on the most recent inbound message in this chat
+	// to the "done" reaction. Only fires for the first reply after an ack;
+	// subsequent replies in the same task are no-ops.
+	if mid, ok := s.b.ConsumePendingAck(chatID); ok {
+		if err := s.b.React(ctx, chatID, mid, bot.DoneReactionEmoji); err != nil {
+			fmt.Fprintf(os.Stderr, "gobrrr-telegram: done react: %v\n", err)
+		}
+	}
+
 	j, _ := json.Marshal(map[string]any{"message_ids": ids})
 	return mcp.NewToolResultText(string(j)), nil
 }
