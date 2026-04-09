@@ -56,7 +56,7 @@ echo "OK: $(uname -m), ${PRETTY_NAME:-$ID}"
 # --- Step 3: Install system packages ---
 step "Installing system packages"
 
-PACKAGES=(git curl jq unzip)
+PACKAGES=(git curl jq unzip expect)
 MISSING=()
 for pkg in "${PACKAGES[@]}"; do
     if ! dpkg -s "$pkg" &>/dev/null; then
