@@ -1,0 +1,27 @@
+[Unit]
+Description=gobrrr channel session (Claude Code + Telegram)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=claude-agent
+Group=claude-agent
+WorkingDirectory=/home/claude-agent/workspace
+Environment=HOME=/home/claude-agent
+Environment=PATH=/home/claude-agent/.local/bin:/home/claude-agent/.bun/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
+Environment=TERM=xterm-256color
+ExecStart=/bin/bash /home/claude-agent/gobrrr/scripts/channel-wrapper.sh
+Restart=on-failure
+RestartSec=30
+MemoryMax=4G
+MemoryHigh=3072M
+KillMode=control-group
+TimeoutStopSec=60
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gobrrr-channels
+
+[Install]
+WantedBy=multi-user.target
