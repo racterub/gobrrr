@@ -262,18 +262,55 @@ else
     sudo -u claude-agent -i claude setup-token
 fi
 
-# --- Step 16: Install Telegram plugin ---
-step "Installing Telegram plugin"
+# --- Step 16: Install gobrrr-telegram channel plugin ---
+step "Installing gobrrr-telegram channel plugin"
+
+# Build the Go binary and stage it inside the plugin dir. The plugin's
+# .mcp.json resolves it via ${CLAUDE_PLUGIN_ROOT}/gobrrr-telegram so the
+# marketplace install ships a self-contained plugin.
+PLUGIN_SRC="$REPO_DIR/plugins/gobrrr-telegram"
+sudo -u claude-agent bash -c "cd '$REPO_DIR/daemon' && CGO_ENABLED=0 go build -o '$PLUGIN_SRC/gobrrr-telegram' ./cmd/gobrrr-telegram/"
+echo "Built gobrrr-telegram binary"
+
+# Publish a local marketplace pointing at the plugin directory.
+MARKETPLACE_DIR="/home/claude-agent/.gobrrr/marketplaces/gobrrr-local"
+sudo -u claude-agent mkdir -p "$MARKETPLACE_DIR/.claude-plugin"
+sudo -u claude-agent tee "$MARKETPLACE_DIR/.claude-plugin/marketplace.json" > /dev/null << MARKETPLACE
+{
+  "name": "gobrrr-local",
+  "owner": { "name": "racterub" },
+  "plugins": [
+    {
+      "name": "gobrrr-telegram",
+      "source": "$PLUGIN_SRC",
+      "description": "gobrrr telegram channel plugin"
+    }
+  ]
+}
+MARKETPLACE
 
 # Claude Code must be launched once after auth to initialize the plugin marketplace.
 echo "Initializing Claude Code marketplace..."
 sudo -u claude-agent -i claude -p "exit" --max-turns 1 &>/dev/null || true
 
+# Remove the official telegram plugin if previously installed.
 if sudo -u claude-agent -i claude plugins installed 2>/dev/null | grep -q "telegram@claude-plugins-official"; then
-    echo "Telegram plugin already installed"
+    sudo -u claude-agent -i claude plugin disable telegram@claude-plugins-official &>/dev/null || true
+    sudo -u claude-agent -i claude plugin uninstall telegram@claude-plugins-official &>/dev/null || true
+    echo "Removed official telegram plugin"
+fi
+
+# Add the local marketplace (idempotent).
+if ! sudo -u claude-agent -i claude plugin marketplace list 2>/dev/null | grep -q "gobrrr-local"; then
+    sudo -u claude-agent -i claude plugin marketplace add "$MARKETPLACE_DIR"
+    echo "Added gobrrr-local marketplace"
+fi
+
+if sudo -u claude-agent -i claude plugins installed 2>/dev/null | grep -q "gobrrr-telegram@gobrrr-local"; then
+    echo "gobrrr-telegram plugin already installed"
 else
-    sudo -u claude-agent -i claude plugins install telegram@claude-plugins-official
-    echo "Installed Telegram plugin"
+    sudo -u claude-agent -i claude plugin install gobrrr-telegram@gobrrr-local
+    echo "Installed gobrrr-telegram plugin"
 fi
 
 # --- Step 17: Configure Claude Code settings ---
@@ -326,7 +363,7 @@ cat > "${CLAUDE_SETTINGS}.tmp" << 'SETTINGS'
       "Bash(gobrrr *)",
       "mcp__claude_ai_Gmail__*",
       "mcp__claude_ai_Google_Calendar__*",
-      "mcp__plugin_telegram_telegram__*",
+      "mcp__plugin_gobrrr-telegram_telegram__*",
       "mcp__context7__*"
     ],
     "deny": [
@@ -345,7 +382,7 @@ cat > "${CLAUDE_SETTINGS}.tmp" << 'SETTINGS'
     ]
   },
   "enabledPlugins": {
-    "telegram@claude-plugins-official": true
+    "gobrrr-telegram@gobrrr-local": true
   },
   "skipDangerousModePermissionPrompt": true
 }
