@@ -39,6 +39,20 @@ type Bot struct {
 	// that the first reply in that chat can swap the reaction to "done".
 	pendingMu  sync.Mutex
 	pendingAck map[int64]int // chatID → messageID
+
+	// permPending holds outstanding Telegram permission prompts keyed by
+	// the 5-letter code shown to the user. The real claude request_id is
+	// stored on the entry so we can relay the verdict back via the
+	// onPermissionReply callback.
+	permMu            sync.Mutex
+	permPending       map[string]*permEntry
+	onPermissionReply func(requestID string, allow bool)
+}
+
+// SetOnPermissionReply registers the callback used to relay the operator's
+// verdict back to Claude Code via the MCP permission notification.
+func (w *Bot) SetOnPermissionReply(fn func(requestID string, allow bool)) {
+	w.onPermissionReply = fn
 }
 
 // ConsumePendingAck returns and clears the pending ack message_id for a chat,

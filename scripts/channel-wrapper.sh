@@ -181,7 +181,7 @@ main() {
         /usr/bin/expect >> "$PTY_LOG" 2>&1 <<EXPECT_EOF
 set timeout -1
 log_user 1
-spawn -noecho $CLAUDE_BIN --dangerously-skip-permissions $CHANNELS
+spawn -noecho $CLAUDE_BIN $CHANNELS
 expect {
     "confirm" { send "\\r" }
     timeout { }

@@ -39,6 +39,7 @@ type Access struct {
 	Groups          map[string]GroupPolicy `json:"groups"`
 	Pending         map[string]Pending     `json:"pending"`
 	MentionPatterns []string               `json:"mentionPatterns,omitempty"`
+	OwnerChatID     string                 `json:"ownerChatId,omitempty"` // single chat that receives permission prompts
 	ReplyToMode     string                 `json:"replyToMode,omitempty"` // off|first|all
 	TextChunkLimit  int                    `json:"textChunkLimit,omitempty"`
 	ChunkMode       string                 `json:"chunkMode,omitempty"` // length|newline

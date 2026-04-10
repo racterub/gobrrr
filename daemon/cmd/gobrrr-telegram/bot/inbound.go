@@ -22,6 +22,10 @@ func (w *Bot) handleUpdate(ctx context.Context, inner *tgbot.Bot, upd *models.Up
 			fmt.Fprintf(os.Stderr, "gobrrr-telegram: panic in handleUpdate: %v\n", r)
 		}
 	}()
+	if upd.CallbackQuery != nil {
+		w.handleCallbackQuery(ctx, upd.CallbackQuery)
+		return
+	}
 	if upd.Message == nil {
 		return
 	}
@@ -46,6 +50,19 @@ func (w *Bot) handleUpdate(ctx context.Context, inner *tgbot.Bot, upd *models.Up
 		return
 	case access.Allow:
 		// fall through to delivery
+	}
+
+	// Intercept permission-prompt replies ("y abcde" / "n abcde") before
+	// they reach the MCP channel as a normal inbound message.
+	if ok, yes, code := permission.Match(msg.Text); ok {
+		if w.HandlePermissionReply(code, yes) {
+			emoji := "👎"
+			if yes {
+				emoji = "👍"
+			}
+			_ = w.React(ctx, msg.Chat.ID, msg.ID, emoji)
+			return
+		}
 	}
 
 	attachPath, attachFileID, _ := w.maybeDownload(ctx, msg)

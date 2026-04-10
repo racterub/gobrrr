@@ -58,6 +58,7 @@ func main() {
 		fail("bot init: %v", err)
 	}
 	mcpSrv = mcpserver.New(b, store, stateDir)
+	b.SetOnPermissionReply(mcpSrv.SendPermissionDecision)
 
 	// Bot long-poll in a goroutine; MCP stdio server blocks main.
 	go func() {
