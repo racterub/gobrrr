@@ -91,22 +91,3 @@ Task submitted
 
 - **Source code research needed for Claude Code permission architecture.** Dig through `claude-code/src` to find whether there is any supported way to have `--settings` *override* user settings while keeping OAuth, or to otherwise scope worker permissions without switching to API-key auth. If none exists, fall back to documenting the limitation and relying on the confirmation gate (`security/confirm.go`) as the real backstop, plus the workspace-CWD boundary from the CWD mismatch fix.
 
-## Telegram Routing Strategy
-
-Currently `--reply-to telegram` pushes results directly to the Telegram Bot API, and `--reply-to channel` pushes results via SSE into the main Claude session through the channel bridge MCP. These are separate paths.
-
-### Decision needed
-
-How should gobrrr tasks (both manual submissions and scheduled tasks) route their responses to Telegram?
-
-- **Direct Bot API push** — Current `--reply-to telegram` behavior. Simple, reliable, but the main Claude session has no awareness of what was sent.
-- **Channel bridge** — Route through the channel MCP so the main Claude session sees the result in context, then let the session decide whether/how to relay it to Telegram.
-- **Both** — Push to Telegram for immediate user visibility AND push to channel so the session stays informed. Current `--reply-to telegram,channel` already supports this.
-
-### Considerations
-
-- Scheduled tasks (from in-process scheduler) may not need session awareness — user just wants the result in Telegram
-- Ad-hoc dispatched tasks from the session likely want channel routing so the session can follow up
-- Should the scheduler support per-schedule `reply_to` configuration?
-- If the session is down (rotating, crashed), channel routing silently drops — should there be a fallback?
-
