@@ -4,7 +4,8 @@
 User asks to run a task in the background, or the current task should spawn a subtask.
 
 ## Commands
-- `gobrrr submit --prompt "..." --reply-to telegram` — run in background, send result to Telegram
+- `gobrrr submit --prompt "..."` — run in background, result routed to channel (default)
+- `gobrrr submit --prompt "..." --reply-to telegram` — run in background, send result directly to Telegram
 - `gobrrr submit --prompt "..." --reply-to stdout` — blocks until done, prints result
 - `gobrrr submit --prompt "..." --allow-writes` — enable write actions (gmail send, gcal create, etc.)
 - `gobrrr submit --prompt "..." --priority 0` — high priority task
