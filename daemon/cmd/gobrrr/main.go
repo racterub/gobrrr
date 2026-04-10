@@ -717,7 +717,7 @@ func init() {
 	daemonCmd.AddCommand(daemonStatusCmd)
 
 	submitCmd.Flags().StringVar(&submitPrompt, "prompt", "", "Task prompt (required)")
-	submitCmd.Flags().StringVar(&submitReplyTo, "reply-to", "", "Reply destination (e.g. telegram)")
+	submitCmd.Flags().StringVar(&submitReplyTo, "reply-to", "channel", "Reply destination (e.g. channel, telegram, stdout)")
 	submitCmd.Flags().IntVar(&submitPriority, "priority", 5, "Task priority (lower = higher priority)")
 	submitCmd.Flags().BoolVar(&submitAllowWrites, "allow-writes", false, "Allow file writes")
 	submitCmd.Flags().IntVar(&submitTimeout, "timeout", 300, "Timeout in seconds")
