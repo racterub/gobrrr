@@ -15,8 +15,7 @@ When the user asks to:
 gobrrr timer create \
   --name "descriptive-name" \
   --cron "CRON_EXPRESSION" \
-  --prompt "What Claude should do when this fires" \
-  --reply-to telegram
+  --prompt "What Claude should do when this fires"
 ```
 
 **Cron format** (standard 5-field):
@@ -27,7 +26,7 @@ gobrrr timer create \
 - Every Sunday at 4am: `0 4 * * 0`
 
 **Options:**
-- `--reply-to`: Where to send results (telegram, channel, or comma-separated)
+- `--reply-to`: Where to send results (default: channel; options: telegram, channel, or comma-separated)
 - `--allow-writes`: Enable write operations for this task
 
 **Prompt guidelines:**
