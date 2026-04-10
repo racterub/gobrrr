@@ -791,7 +791,7 @@ func init() {
 	timerCreateCmd.Flags().String("name", "", "Schedule name (required)")
 	timerCreateCmd.Flags().String("cron", "", "Cron expression (required)")
 	timerCreateCmd.Flags().String("prompt", "", "Task prompt (required)")
-	timerCreateCmd.Flags().String("reply-to", "telegram", "Result destination")
+	timerCreateCmd.Flags().String("reply-to", "channel", "Result destination")
 	timerCreateCmd.Flags().Bool("allow-writes", false, "Allow write operations")
 	timerCreateCmd.MarkFlagRequired("name")
 	timerCreateCmd.MarkFlagRequired("cron")
