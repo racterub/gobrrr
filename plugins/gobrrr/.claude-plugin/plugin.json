@@ -1,0 +1,7 @@
+{
+  "name": "gobrrr",
+  "version": "0.0.1",
+  "license": "Apache-2.0",
+  "description": "Channel bridge that relays gobrrr task results into the Claude session",
+  "keywords": ["gobrrr", "channel", "mcp", "task-dispatch"]
+}

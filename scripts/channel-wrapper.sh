@@ -18,7 +18,7 @@ IDLE_TIMEOUT_MIN=$(cfg '.telegram_session.idle_threshold_min // 30')
 MEMORY_CEILING_MB=$(cfg '.telegram_session.memory_ceiling_mb // 3072')
 MAX_UPTIME_HOURS=$(cfg '.telegram_session.max_uptime_hours // 6')
 MAX_RESTART_ATTEMPTS=$(cfg '.telegram_session.max_restart_attempts // 6')
-CHANNELS=$(cfg '[.telegram_session.channels // ["plugin:gobrrr-telegram@gobrrr-local"] | .[] | "--dangerously-load-development-channels", .] | join(" ")')
+CHANNELS=$(cfg '[.telegram_session.channels // ["plugin:gobrrr-telegram@gobrrr-local","plugin:gobrrr@gobrrr-local"] | .[] | "--dangerously-load-development-channels", .] | join(" ")')
 
 # Telegram notification config
 TELEGRAM_BOT_TOKEN=""
@@ -183,10 +183,9 @@ set timeout -1
 log_user 1
 spawn -noecho $CLAUDE_BIN $CHANNELS
 expect {
-    "confirm" { send "\\r" }
-    timeout { }
+    "confirm" { send "\\r"; exp_continue }
+    eof
 }
-expect eof
 catch wait result
 exit [lindex \$result 3]
 EXPECT_EOF

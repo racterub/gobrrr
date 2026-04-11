@@ -215,31 +215,25 @@ step "Building gobrrr"
 (cd "$REPO_DIR/daemon" && CGO_ENABLED=0 go build -o /usr/local/bin/gobrrr ./cmd/gobrrr/)
 echo "Built: $(gobrrr --version 2>/dev/null || echo 'gobrrr installed')"
 
-# --- Step 12: Install channel bridge dependencies ---
-step "Installing channel bridge dependencies"
+# --- Step 12: Install gobrrr channel plugin dependencies ---
+step "Installing gobrrr channel plugin dependencies"
 
-(cd "$REPO_DIR/channel" && sudo -u claude-agent bun install)
-echo "Channel bridge dependencies installed"
+(cd "$REPO_DIR/plugins/gobrrr" && sudo -u claude-agent bun install)
+echo "gobrrr channel plugin dependencies installed"
 
-# --- Step 13: Configure channel MCP ---
-step "Configuring channel MCP"
+# --- Step 13: Clean up legacy channel MCP entry ---
+step "Cleaning up legacy channel MCP entry"
 
 MCP_FILE="/home/claude-agent/.mcp.json"
-GOBRRR_MCP='{"type":"stdio","command":"bun","args":["run","/home/claude-agent/gobrrr/channel/index.ts"]}'
-
-MCP_TMP="${MCP_FILE}.tmp"
-if [ -f "$MCP_FILE" ]; then
-    # Merge into existing config, preserving other entries
-    jq --argjson gobrrr "$GOBRRR_MCP" '.mcpServers.gobrrr = $gobrrr' "$MCP_FILE" > "$MCP_TMP"
+if [ -f "$MCP_FILE" ] && jq -e '.mcpServers.gobrrr' "$MCP_FILE" &>/dev/null; then
+    MCP_TMP="${MCP_FILE}.tmp"
+    jq 'del(.mcpServers.gobrrr)' "$MCP_FILE" > "$MCP_TMP"
     mv "$MCP_TMP" "$MCP_FILE"
-    echo "Merged gobrrr into existing $MCP_FILE"
+    chown claude-agent:claude-agent "$MCP_FILE"
+    echo "Removed legacy gobrrr entry from $MCP_FILE (now a channel plugin)"
 else
-    # Create new file
-    jq -n --argjson gobrrr "$GOBRRR_MCP" '{"mcpServers":{"gobrrr":$gobrrr}}' > "$MCP_TMP"
-    mv "$MCP_TMP" "$MCP_FILE"
-    echo "Created $MCP_FILE"
+    echo "No legacy gobrrr MCP entry found, skipping"
 fi
-chown claude-agent:claude-agent "$MCP_FILE"
 
 # --- Step 14: Install systemd unit ---
 step "Installing systemd service"
@@ -286,6 +280,11 @@ sudo -u claude-agent tee "$MARKETPLACE_DIR/.claude-plugin/marketplace.json" > /d
       "name": "gobrrr-telegram",
       "source": "$PLUGIN_SRC",
       "description": "gobrrr telegram channel plugin"
+    },
+    {
+      "name": "gobrrr",
+      "source": "$REPO_DIR/plugins/gobrrr",
+      "description": "gobrrr task result channel bridge"
     }
   ]
 }
@@ -313,6 +312,13 @@ if sudo -u claude-agent -i claude plugins installed 2>/dev/null | grep -q "gobrr
 else
     sudo -u claude-agent -i claude plugin install gobrrr-telegram@gobrrr-local
     echo "Installed gobrrr-telegram plugin"
+fi
+
+if sudo -u claude-agent -i claude plugins installed 2>/dev/null | grep -q "gobrrr@gobrrr-local"; then
+    echo "gobrrr channel plugin already installed"
+else
+    sudo -u claude-agent -i claude plugin install gobrrr@gobrrr-local
+    echo "Installed gobrrr channel plugin"
 fi
 
 # --- Step 17: Configure Claude Code settings ---
@@ -366,7 +372,8 @@ cat > "${CLAUDE_SETTINGS}.tmp" << 'SETTINGS'
       "mcp__claude_ai_Gmail__*",
       "mcp__claude_ai_Google_Calendar__*",
       "mcp__plugin_gobrrr-telegram_telegram__*",
-      "mcp__context7__*"
+      "mcp__context7__*",
+      "mcp__plugin_gobrrr_gobrrr__*"
     ],
     "deny": [
       "Bash(sudo *)",
@@ -384,7 +391,8 @@ cat > "${CLAUDE_SETTINGS}.tmp" << 'SETTINGS'
     ]
   },
   "enabledPlugins": {
-    "gobrrr-telegram@gobrrr-local": true
+    "gobrrr-telegram@gobrrr-local": true,
+    "gobrrr@gobrrr-local": true
   },
   "skipDangerousModePermissionPrompt": true
 }

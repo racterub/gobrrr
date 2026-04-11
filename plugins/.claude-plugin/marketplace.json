@@ -1,0 +1,16 @@
+{
+  "name": "gobrrr-local",
+  "owner": { "name": "racterub" },
+  "plugins": [
+    {
+      "name": "gobrrr-telegram",
+      "source": "./gobrrr-telegram",
+      "description": "gobrrr telegram channel plugin"
+    },
+    {
+      "name": "gobrrr",
+      "source": "./gobrrr",
+      "description": "gobrrr task result channel bridge"
+    }
+  ]
+}
