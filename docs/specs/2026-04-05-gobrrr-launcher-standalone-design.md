@@ -1,4 +1,4 @@
-# gobrrr-channels: Standalone Channel Session Service
+# gobrrr-launcher: Standalone Channel Session Service
 
 ## Problem
 
@@ -6,13 +6,13 @@ gobrrr's built-in Go session manager (`daemon/internal/session/`) uses `creack/p
 
 ## Solution
 
-Extract the channel session into a standalone systemd service (`gobrrr-channels.service`) with a shell wrapper script adapted from the proven old assistant. gobrrr daemon keeps task dispatch, workers, heartbeat, memory, and scheduling — but no longer manages the channel session.
+Extract the channel session into a standalone systemd service (`gobrrr-launcher.service`) with a shell wrapper script adapted from the proven old assistant. gobrrr daemon keeps task dispatch, workers, heartbeat, memory, and scheduling — but no longer manages the channel session.
 
 ## Architecture
 
 ```
 gobrrr.service            — Go daemon: task queue, workers, heartbeat, scheduling
-gobrrr-channels.service   — Shell: script -qec claude --channels, rotation, backoff
+gobrrr-launcher.service   — Shell: script -qec claude --channels, rotation, backoff
 ```
 
 Two independent systemd services, same user (`claude-agent`), no runtime dependency between them. They share the filesystem (`~/.gobrrr/`, `~/workspace`) but never communicate directly.
@@ -21,23 +21,23 @@ Two independent systemd services, same user (`claude-agent`), no runtime depende
 
 ### New
 
-- `scripts/channel-wrapper.sh` — Session lifecycle script (adapted from `dotfiles/assistant/bin/session-wrapper.sh`)
-- `daemon/systemd/gobrrr-channels.service` — Systemd unit
+- `scripts/launcher.sh` — Session lifecycle script (adapted from `dotfiles/assistant/bin/session-wrapper.sh`)
+- `daemon/systemd/gobrrr-launcher.service` — Systemd unit
 
 ### Modified
 
-- `scripts/install.sh` — Install and enable `gobrrr-channels.service`
+- `scripts/install.sh` — Install and enable `gobrrr-launcher.service`
 - `daemon/internal/config/config.go` — Default `telegram_session.enabled` stays `false` (already the default)
 
 ### Not modified
 
 - `daemon/internal/session/manager.go` — Revert the `script` wrapper and debug logging changes from this session, keep the Go session manager as an opt-in fallback
 
-## channel-wrapper.sh
+## launcher.sh
 
 Adapted from `dotfiles/assistant/bin/session-wrapper.sh`. Changes:
 
-| Aspect | Old assistant | gobrrr-channels |
+| Aspect | Old assistant | gobrrr-launcher |
 |--------|--------------|-----------------|
 | Config source | `config.env` (shell vars) | `~/.gobrrr/config.json` via `jq` |
 | Claude command | hardcoded | Channels read from config |
@@ -74,7 +74,7 @@ Adapted from `dotfiles/assistant/bin/session-wrapper.sh`. Changes:
 
 Read bot token from `~/.claude/channels/telegram/.env` and chat ID from `~/.gobrrr/config.json` (decrypted). For the wrapper script, store a plaintext chat ID at `~/.gobrrr/telegram-chat-id` (created during setup) since the shell script can't decrypt the vault.
 
-## gobrrr-channels.service
+## gobrrr-launcher.service
 
 ```ini
 [Unit]
@@ -91,7 +91,7 @@ WorkingDirectory=/home/claude-agent/workspace
 Environment=HOME=/home/claude-agent
 Environment=PATH=/home/claude-agent/.local/bin:/home/claude-agent/.bun/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
 Environment=TERM=xterm-256color
-ExecStart=/bin/bash /home/claude-agent/gobrrr/scripts/channel-wrapper.sh
+ExecStart=/bin/bash /home/claude-agent/gobrrr/scripts/launcher.sh
 Restart=on-failure
 RestartSec=30
 MemoryMax=4G
@@ -100,7 +100,7 @@ KillMode=control-group
 TimeoutStopSec=60
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=gobrrr-channels
+SyslogIdentifier=gobrrr-launcher
 
 [Install]
 WantedBy=multi-user.target
@@ -116,10 +116,10 @@ Key differences from `gobrrr.service`:
 
 Add a new step after the existing gobrrr service installation:
 
-1. Copy `gobrrr-channels.service` from repo to `/etc/systemd/system/`
-2. `systemctl daemon-reload && systemctl enable gobrrr-channels`
+1. Copy `gobrrr-launcher.service` from repo to `/etc/systemd/system/`
+2. `systemctl daemon-reload && systemctl enable gobrrr-launcher`
 3. Extract plaintext chat ID to `~/.gobrrr/telegram-chat-id` (for shell script notifications)
-4. Start `gobrrr-channels` after `gobrrr`
+4. Start `gobrrr-launcher` after `gobrrr`
 
 ## What gobrrr daemon keeps
 
@@ -132,9 +132,9 @@ Add a new step after the existing gobrrr service installation:
 
 ## Testing
 
-1. Deploy `channel-wrapper.sh` and `gobrrr-channels.service` to remote server (10.0.10.20)
+1. Deploy `launcher.sh` and `gobrrr-launcher.service` to remote server (10.0.10.20)
 2. Stop gobrrr, disable its built-in session
-3. Start `gobrrr-channels` service
+3. Start `gobrrr-launcher` service
 4. Verify: process tree shows `script → claude → bun (telegram plugin)`
 5. Verify: `getUpdates?timeout=5` returns 409 (bot is polling)
 6. Verify: send Telegram message, get response

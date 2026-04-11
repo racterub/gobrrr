@@ -1,5 +1,5 @@
 #!/bin/bash
-# gobrrr-channels: launches Claude Code with channel plugins, monitors, rotates
+# gobrrr-launcher: launches Claude Code with channel plugins, monitors, rotates
 # Handles: idle timeout, memory ceiling, max uptime, exponential backoff
 set -euo pipefail
 
@@ -86,7 +86,7 @@ get_idle_sec() {
 # --- Memory check ---
 get_memory_mb() {
     local mem_bytes
-    mem_bytes=$(systemctl show gobrrr-channels --property=MemoryCurrent --value 2>/dev/null || echo 0)
+    mem_bytes=$(systemctl show gobrrr-launcher --property=MemoryCurrent --value 2>/dev/null || echo 0)
     echo $(( mem_bytes / 1048576 ))
 }
 
@@ -210,12 +210,12 @@ EXPECT_EOF
 
         if [ "$backoff" -eq -1 ]; then
             echo "[$(date)] Too many restarts ($restart_count). Stopping."
-            send_telegram "gobrrr-channels stopped after $restart_count consecutive failures. Manual intervention needed."
+            send_telegram "gobrrr-launcher stopped after $restart_count consecutive failures. Manual intervention needed."
             exit 1
         fi
 
         if [ "$restart_count" -ge 4 ]; then
-            send_telegram "gobrrr-channels restarting (attempt $restart_count). Backing off ${backoff}s."
+            send_telegram "gobrrr-launcher restarting (attempt $restart_count). Backing off ${backoff}s."
         fi
 
         echo "[$(date)] Backing off ${backoff}s before restart"

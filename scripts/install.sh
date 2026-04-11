@@ -239,11 +239,11 @@ fi
 step "Installing systemd service"
 
 cp "$REPO_DIR/daemon/systemd/gobrrr.service" /etc/systemd/system/gobrrr.service
-cp "$REPO_DIR/daemon/systemd/gobrrr-channels.service" /etc/systemd/system/gobrrr-channels.service
+cp "$REPO_DIR/daemon/systemd/gobrrr-launcher.service" /etc/systemd/system/gobrrr-launcher.service
 
 systemctl daemon-reload
 systemctl enable gobrrr
-systemctl enable gobrrr-channels
+systemctl enable gobrrr-launcher
 echo "Services installed and enabled"
 
 # --- Step 15: Authenticate Claude Code ---
@@ -445,11 +445,11 @@ else
     systemctl start gobrrr
 fi
 
-if systemctl is-active --quiet gobrrr-channels; then
-    echo "gobrrr-channels already running, restarting..."
-    systemctl restart gobrrr-channels
+if systemctl is-active --quiet gobrrr-launcher; then
+    echo "gobrrr-launcher already running, restarting..."
+    systemctl restart gobrrr-launcher
 else
-    systemctl start gobrrr-channels
+    systemctl start gobrrr-launcher
 fi
 
 # --- Verify ---
@@ -463,10 +463,10 @@ else
     echo "WARNING: gobrrr is not running. Check: journalctl -u gobrrr -n 20"
 fi
 
-if systemctl is-active --quiet gobrrr-channels; then
-    echo "gobrrr-channels is running"
+if systemctl is-active --quiet gobrrr-launcher; then
+    echo "gobrrr-launcher is running"
 else
-    echo "WARNING: gobrrr-channels is not running. Check: journalctl -u gobrrr-channels -n 20"
+    echo "WARNING: gobrrr-launcher is not running. Check: journalctl -u gobrrr-launcher -n 20"
 fi
 
 gobrrr --version
