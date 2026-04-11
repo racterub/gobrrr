@@ -218,8 +218,8 @@ echo "Built: $(gobrrr --version 2>/dev/null || echo 'gobrrr installed')"
 # --- Step 12: Install gobrrr channel plugin dependencies ---
 step "Installing gobrrr channel plugin dependencies"
 
-(cd "$REPO_DIR/plugins/gobrrr" && sudo -u claude-agent bun install)
-echo "gobrrr channel plugin dependencies installed"
+(cd "$REPO_DIR/plugins/gobrrr-relay" && sudo -u claude-agent bun install)
+echo "gobrrr-relay channel plugin dependencies installed"
 
 # --- Step 13: Clean up legacy channel MCP entry ---
 step "Cleaning up legacy channel MCP entry"
@@ -282,8 +282,8 @@ sudo -u claude-agent tee "$MARKETPLACE_DIR/.claude-plugin/marketplace.json" > /d
       "description": "gobrrr telegram channel plugin"
     },
     {
-      "name": "gobrrr",
-      "source": "$REPO_DIR/plugins/gobrrr",
+      "name": "gobrrr-relay",
+      "source": "$REPO_DIR/plugins/gobrrr-relay",
       "description": "gobrrr task result channel bridge"
     }
   ]
@@ -314,11 +314,11 @@ else
     echo "Installed gobrrr-telegram plugin"
 fi
 
-if sudo -u claude-agent -i claude plugins installed 2>/dev/null | grep -q "gobrrr@gobrrr-local"; then
-    echo "gobrrr channel plugin already installed"
+if sudo -u claude-agent -i claude plugins installed 2>/dev/null | grep -q "gobrrr-relay@gobrrr-local"; then
+    echo "gobrrr-relay channel plugin already installed"
 else
-    sudo -u claude-agent -i claude plugin install gobrrr@gobrrr-local
-    echo "Installed gobrrr channel plugin"
+    sudo -u claude-agent -i claude plugin install gobrrr-relay@gobrrr-local
+    echo "Installed gobrrr-relay channel plugin"
 fi
 
 # --- Step 17: Configure Claude Code settings ---
@@ -373,7 +373,7 @@ cat > "${CLAUDE_SETTINGS}.tmp" << 'SETTINGS'
       "mcp__claude_ai_Google_Calendar__*",
       "mcp__plugin_gobrrr-telegram_telegram__*",
       "mcp__context7__*",
-      "mcp__plugin_gobrrr_gobrrr__*"
+      "mcp__plugin_gobrrr-relay_gobrrr-relay__*"
     ],
     "deny": [
       "Bash(sudo *)",
@@ -392,7 +392,7 @@ cat > "${CLAUDE_SETTINGS}.tmp" << 'SETTINGS'
   },
   "enabledPlugins": {
     "gobrrr-telegram@gobrrr-local": true,
-    "gobrrr@gobrrr-local": true
+    "gobrrr-relay@gobrrr-local": true
   },
   "skipDangerousModePermissionPrompt": true
 }

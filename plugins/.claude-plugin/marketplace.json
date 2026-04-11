@@ -8,8 +8,8 @@
       "description": "gobrrr telegram channel plugin"
     },
     {
-      "name": "gobrrr",
-      "source": "./gobrrr",
+      "name": "gobrrr-relay",
+      "source": "./gobrrr-relay",
       "description": "gobrrr task result channel bridge"
     }
   ]

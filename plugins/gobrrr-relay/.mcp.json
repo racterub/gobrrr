@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "gobrrr": {
+    "gobrrr-relay": {
       "command": "bun",
       "args": ["run", "${CLAUDE_PLUGIN_ROOT}/index.ts"]
     }
