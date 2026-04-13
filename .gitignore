@@ -5,3 +5,4 @@ plugins/gobrrr-telegram/gobrrr-telegram
 *.exe
 .gobrrr/
 vendor/
+.worktrees/
