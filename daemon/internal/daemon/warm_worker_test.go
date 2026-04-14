@@ -96,3 +96,71 @@ func TestWarmWorkerStart(t *testing.T) {
 
 	ww.Stop()
 }
+
+// writeCrashScript creates a script that crashes after one task dispatch.
+func writeCrashScript(t *testing.T, dir string) string {
+	t.Helper()
+	script := filepath.Join(dir, "mock-claude-crash.sh")
+	content := `#!/bin/bash
+echo '{"type":"system","subtype":"init","session_id":"crash-session"}'
+# Read identity, send ack
+read -r line
+echo '{"type":"result","subtype":"success","result":"ready","is_error":false,"duration_ms":1}'
+# Read first task, then crash
+read -r line
+exit 1
+`
+	require.NoError(t, os.WriteFile(script, []byte(content), 0755))
+	return script
+}
+
+// writeErrorScript creates a script that returns an error result.
+func writeErrorScript(t *testing.T, dir string) string {
+	t.Helper()
+	script := filepath.Join(dir, "mock-claude-error.sh")
+	content := `#!/bin/bash
+echo '{"type":"system","subtype":"init","session_id":"error-session"}'
+read -r line
+echo '{"type":"result","subtype":"success","result":"ready","is_error":false,"duration_ms":1}'
+read -r line
+echo '{"type":"result","subtype":"error_during_execution","result":"","is_error":true,"errors":["something broke"],"duration_ms":10}'
+`
+	require.NoError(t, os.WriteFile(script, []byte(content), 0755))
+	return script
+}
+
+func TestWarmWorkerRunCrash(t *testing.T) {
+	dir := t.TempDir()
+	script := writeCrashScript(t, dir)
+	writeMockIdentity(t, dir)
+
+	ww := NewWarmWorker(0, dir, &config.Config{WorkspacePath: dir}, nil)
+	ww.command = script
+
+	ctx := t.Context()
+
+	require.NoError(t, ww.Start(ctx))
+
+	task := &Task{ID: "t_crash", Prompt: "crash me", TimeoutSec: 10}
+	_, err := ww.Run(task)
+	assert.Error(t, err, "Run should return error on crash")
+	assert.Contains(t, err.Error(), "no result message")
+}
+
+func TestWarmWorkerRunErrorResult(t *testing.T) {
+	dir := t.TempDir()
+	script := writeErrorScript(t, dir)
+	writeMockIdentity(t, dir)
+
+	ww := NewWarmWorker(0, dir, &config.Config{WorkspacePath: dir}, nil)
+	ww.command = script
+
+	ctx := t.Context()
+
+	require.NoError(t, ww.Start(ctx))
+
+	task := &Task{ID: "t_error", Prompt: "fail me", TimeoutSec: 10}
+	_, err := ww.Run(task)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "something broke")
+}
