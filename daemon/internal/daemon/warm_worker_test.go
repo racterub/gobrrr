@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,6 +34,50 @@ func writeMockIdentity(t *testing.T, dir string) {
 		[]byte("You are a test assistant."),
 		0644,
 	))
+}
+
+func TestWarmWorkerRun(t *testing.T) {
+	dir := t.TempDir()
+	script := writeMockScript(t, dir)
+	writeMockIdentity(t, dir)
+
+	ww := NewWarmWorker(0, dir, &config.Config{WorkspacePath: dir}, nil)
+	ww.command = script
+
+	ctx := t.Context()
+
+	require.NoError(t, ww.Start(ctx))
+
+	task := &Task{ID: "t_test_1", Prompt: "what is 2+2?", TimeoutSec: 10}
+	result, err := ww.Run(task)
+	require.NoError(t, err)
+	assert.Equal(t, "mock response", result)
+
+	// Worker should be available for another task after Run completes.
+	// (Run does not manage busy flag — caller does via Reserve/Release.)
+	ww.Stop()
+}
+
+func TestWarmWorkerRunMultipleTasks(t *testing.T) {
+	dir := t.TempDir()
+	script := writeMockScript(t, dir)
+	writeMockIdentity(t, dir)
+
+	ww := NewWarmWorker(0, dir, &config.Config{WorkspacePath: dir}, nil)
+	ww.command = script
+
+	ctx := t.Context()
+
+	require.NoError(t, ww.Start(ctx))
+
+	for i := 0; i < 3; i++ {
+		task := &Task{ID: fmt.Sprintf("t_test_%d", i), Prompt: fmt.Sprintf("task %d", i), TimeoutSec: 10}
+		result, err := ww.Run(task)
+		require.NoError(t, err)
+		assert.Equal(t, "mock response", result)
+	}
+
+	ww.Stop()
 }
 
 func TestWarmWorkerStart(t *testing.T) {

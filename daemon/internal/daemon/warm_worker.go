@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -154,6 +155,54 @@ func (ww *WarmWorker) Stop() {
 	ww.mu.Lock()
 	defer ww.mu.Unlock()
 	ww.killLocked()
+}
+
+// Run sends a task prompt to the warm worker and returns the result.
+// The caller must Reserve() before calling Run() and Release() after.
+// Run does not manage the busy flag.
+func (ww *WarmWorker) Run(task *Task) (string, error) {
+	prompt := ww.buildTaskPrompt(task.Prompt)
+
+	if err := writeUserMessage(ww.stdin, prompt); err != nil {
+		return "", fmt.Errorf("warm worker %d: write: %w", ww.id, err)
+	}
+
+	result, err := readUntilResult(ww.scanner)
+	if err != nil {
+		return "", fmt.Errorf("warm worker %d: read: %w", ww.id, err)
+	}
+
+	if result.IsError {
+		return "", fmt.Errorf("warm worker %d: %s", ww.id, strings.Join(result.Errors, "; "))
+	}
+
+	return result.Result, nil
+}
+
+// buildTaskPrompt builds the per-task prompt with relevant memories (no identity).
+func (ww *WarmWorker) buildTaskPrompt(taskPrompt string) string {
+	var sb strings.Builder
+
+	if ww.memStore != nil {
+		all, err := ww.memStore.List(0)
+		if err == nil && len(all) > 0 {
+			relevant := memory.MatchRelevant(all, taskPrompt, 10)
+			if len(relevant) > 0 {
+				sb.WriteString("<memories>\n")
+				for _, e := range relevant {
+					sb.WriteString(e.Content)
+					sb.WriteString("\n")
+				}
+				sb.WriteString("</memories>\n\n")
+			}
+		}
+	}
+
+	sb.WriteString("<task>\n")
+	sb.WriteString(taskPrompt)
+	sb.WriteString("\n</task>")
+
+	return sb.String()
 }
 
 // killLocked terminates the process. Caller must hold ww.mu.
