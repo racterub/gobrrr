@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -136,6 +137,8 @@ type WorkerPool struct {
 	gobrrDir      string
 	memStore      *memory.Store
 	buildCommand  func(task *Task) *WorkerConfig
+	warmWorkers   []*WarmWorker
+	warmCommand   string // override for tests, empty = "claude"
 	// onResult is called after a task completes or fails. It is optional.
 	onResult func(task *Task, result string)
 }
@@ -221,8 +224,56 @@ func (wp *WorkerPool) buildFullPrompt(taskPrompt string) string {
 	return identity.BuildPrompt(ident, memContents, taskPrompt)
 }
 
-// Run starts the worker pool loop, ticking every second to check for available
-// tasks and spawn workers up to maxWorkers. It blocks until ctx is cancelled.
+// StartWarm pre-spawns warm workers. Call before Run().
+func (wp *WorkerPool) StartWarm(ctx context.Context) error {
+	warmCount := 0
+	if wp.cfg != nil {
+		warmCount = wp.cfg.WarmWorkers
+	}
+
+	for i := 0; i < warmCount; i++ {
+		ww := NewWarmWorker(i, wp.gobrrDir, wp.cfg, wp.memStore)
+		if wp.warmCommand != "" {
+			ww.command = wp.warmCommand
+		}
+		if err := ww.Start(ctx); err != nil {
+			log.Printf("warm worker %d: failed to start: %v", i, err)
+			continue
+		}
+		wp.warmWorkers = append(wp.warmWorkers, ww)
+	}
+	return nil
+}
+
+// reserveWarmWorker finds an idle warm worker and atomically reserves it.
+func (wp *WorkerPool) reserveWarmWorker() *WarmWorker {
+	for _, ww := range wp.warmWorkers {
+		if ww.Reserve() {
+			return ww
+		}
+	}
+	return nil
+}
+
+// WarmStatus returns the total, ready, and busy counts for warm workers.
+func (wp *WorkerPool) WarmStatus() (total, ready, busy int) {
+	for _, ww := range wp.warmWorkers {
+		total++
+		ww.mu.Lock()
+		if ww.ready {
+			ready++
+		}
+		if ww.busy {
+			busy++
+		}
+		ww.mu.Unlock()
+	}
+	return
+}
+
+// Run starts the worker pool loop. It uses a two-pass dispatch:
+// pass 1 routes warm tasks to warm workers, pass 2 dispatches remaining
+// tasks (including warm fallback) via cold spawn. Blocks until ctx is cancelled.
 func (wp *WorkerPool) Run(ctx context.Context) {
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
@@ -232,7 +283,21 @@ func (wp *WorkerPool) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// Inner loop: keep spawning tasks as long as capacity and rate limit allow.
+			// Pass 1: dispatch warm tasks to warm workers.
+			for {
+				ww := wp.reserveWarmWorker()
+				if ww == nil {
+					break
+				}
+				task, err := wp.queue.NextWarm()
+				if err != nil || task == nil {
+					ww.Release()
+					break
+				}
+				go wp.dispatchWarm(ctx, ww, task)
+			}
+
+			// Pass 2: dispatch any remaining tasks cold.
 			for {
 				wp.mu.Lock()
 				active := wp.active
@@ -254,33 +319,64 @@ func (wp *WorkerPool) Run(ctx context.Context) {
 				wp.lastSpawn = time.Now()
 				wp.mu.Unlock()
 
-				go func(t *Task) {
-					defer func() {
-						wp.mu.Lock()
-						wp.active--
-						wp.mu.Unlock()
-						// Clean up per-task settings directory.
-						workersDir := filepath.Join(wp.gobrrDir, "workers")
-						_ = security.Cleanup(workersDir, t.ID) //nolint:errcheck
-					}()
-
-					cfg := wp.buildCommand(t)
-					result, err := runWorker(ctx, cfg)
-					if err != nil {
-						msg := strings.TrimSpace(err.Error())
-						_ = wp.queue.Fail(t.ID, msg) //nolint:errcheck
-						if wp.onResult != nil && t.ReplyTo == "telegram" {
-							wp.onResult(t, "Task failed: "+msg)
-						}
-						return
-					}
-					_ = wp.queue.Complete(t.ID, result) //nolint:errcheck
-					if wp.onResult != nil {
-						wp.onResult(t, result)
-					}
-				}(task)
+				go wp.dispatchCold(ctx, task)
 			}
 		}
+	}
+}
+
+// dispatchWarm sends a task to a warm worker, handles result routing and
+// crash recovery.
+func (wp *WorkerPool) dispatchWarm(ctx context.Context, ww *WarmWorker, task *Task) {
+	defer ww.Release()
+
+	result, err := ww.Run(task)
+	if err != nil {
+		msg := strings.TrimSpace(err.Error())
+		_ = wp.queue.Fail(task.ID, msg)
+		if wp.onResult != nil && task.ReplyTo == "telegram" {
+			wp.onResult(task, "Task failed: "+msg)
+		}
+		// Respawn crashed warm worker if daemon is still running.
+		if ctx.Err() == nil {
+			log.Printf("warm worker %d: crash detected, respawning", ww.id)
+			ww.Stop()
+			if startErr := ww.Start(ctx); startErr != nil {
+				log.Printf("warm worker %d: respawn failed: %v", ww.id, startErr)
+			}
+		}
+		return
+	}
+
+	_ = wp.queue.Complete(task.ID, result)
+	if wp.onResult != nil {
+		wp.onResult(task, result)
+	}
+}
+
+// dispatchCold runs a task via cold spawn (existing behavior).
+func (wp *WorkerPool) dispatchCold(ctx context.Context, task *Task) {
+	defer func() {
+		wp.mu.Lock()
+		wp.active--
+		wp.mu.Unlock()
+		workersDir := filepath.Join(wp.gobrrDir, "workers")
+		_ = security.Cleanup(workersDir, task.ID)
+	}()
+
+	cfg := wp.buildCommand(task)
+	result, err := runWorker(ctx, cfg)
+	if err != nil {
+		msg := strings.TrimSpace(err.Error())
+		_ = wp.queue.Fail(task.ID, msg)
+		if wp.onResult != nil && task.ReplyTo == "telegram" {
+			wp.onResult(task, "Task failed: "+msg)
+		}
+		return
+	}
+	_ = wp.queue.Complete(task.ID, result)
+	if wp.onResult != nil {
+		wp.onResult(task, result)
 	}
 }
 

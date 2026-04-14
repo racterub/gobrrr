@@ -207,3 +207,98 @@ func TestNewWorkerPoolCreatesWorkspace(t *testing.T) {
 	require.NoError(t, err, "workspace directory should be created")
 	assert.True(t, info.IsDir())
 }
+
+func TestWorkerPoolRoutesWarmTask(t *testing.T) {
+	dir := t.TempDir()
+	queuePath := filepath.Join(dir, "queue.json")
+	q := NewQueue(queuePath)
+
+	// Write mock identity for warm worker.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "identity.md"), []byte("test identity"), 0644))
+
+	// Write mock Claude script.
+	script := filepath.Join(dir, "mock-claude.sh")
+	content := `#!/bin/bash
+echo '{"type":"system","subtype":"init","session_id":"pool-session"}'
+while IFS= read -r line; do
+  echo '{"type":"result","subtype":"success","result":"warm result","is_error":false,"duration_ms":5}'
+done
+`
+	require.NoError(t, os.WriteFile(script, []byte(content), 0755))
+
+	cfg := &config.Config{WorkspacePath: dir, WarmWorkers: 1}
+	pool := NewWorkerPool(q, cfg, 2, 0, dir, nil)
+
+	// Override warm worker command for testing.
+	pool.warmCommand = script
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Start warm workers.
+	require.NoError(t, pool.StartWarm(ctx))
+
+	// Submit a warm task.
+	task, err := q.Submit("warm prompt", "", 0, false, 10, true)
+	require.NoError(t, err)
+
+	go pool.Run(ctx)
+
+	// Wait for task completion.
+	require.Eventually(t, func() bool {
+		t2, err := q.Get(task.ID)
+		if err != nil {
+			return false
+		}
+		return t2.Status == "completed"
+	}, 5*time.Second, 50*time.Millisecond)
+
+	completed, err := q.Get(task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, completed.Result)
+	assert.Equal(t, "warm result", *completed.Result)
+
+	cancel()
+}
+
+func TestWorkerPoolWarmFallbackToCold(t *testing.T) {
+	dir := t.TempDir()
+	queuePath := filepath.Join(dir, "queue.json")
+	q := NewQueue(queuePath)
+
+	cfg := &config.Config{WorkspacePath: dir, WarmWorkers: 0} // no warm workers
+	pool := NewWorkerPool(q, cfg, 2, 0, dir, nil)
+	pool.buildCommand = func(task *Task) *WorkerConfig {
+		return &WorkerConfig{
+			Command:    "echo",
+			Args:       []string{"cold fallback"},
+			TimeoutSec: 5,
+			WorkDir:    dir,
+			LogPath:    filepath.Join(dir, task.ID+".log"),
+		}
+	}
+
+	// Submit a warm task — should fall back to cold since no warm workers.
+	task, err := q.Submit("warm prompt", "", 0, false, 10, true)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	go pool.Run(ctx)
+
+	require.Eventually(t, func() bool {
+		t2, err := q.Get(task.ID)
+		if err != nil {
+			return false
+		}
+		return t2.Status == "completed"
+	}, 5*time.Second, 50*time.Millisecond)
+
+	completed, err := q.Get(task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, completed.Result)
+	assert.Equal(t, "cold fallback\n", *completed.Result)
+
+	cancel()
+}
