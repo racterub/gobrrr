@@ -196,6 +196,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Start systemd watchdog (no-op if NOTIFY_SOCKET is not set).
 	go StartWatchdog(ctx)
 
+	// Start warm workers (pre-spawn for sub-second dispatch).
+	if err := d.workerPool.StartWarm(ctx); err != nil {
+		log.Printf("warm pool: startup error: %v", err)
+	}
+
 	// Start the worker pool in the background.
 	go d.workerPool.Run(ctx)
 
@@ -293,21 +298,31 @@ func (d *Daemon) updateHeartbeat() {
 	d.heartbeat.Update(status, memMB, msg)
 }
 
+// warmStatus describes the warm worker pool's capacity and current utilization.
+type warmStatus struct {
+	Total int `json:"total"`
+	Ready int `json:"ready"`
+	Busy  int `json:"busy"`
+}
+
 // healthResponse is the JSON body returned by GET /health.
 type healthResponse struct {
-	Status        string `json:"status"`
-	UptimeSec     int64  `json:"uptime_sec"`
-	WorkersActive int    `json:"workers_active"`
-	QueueDepth    int    `json:"queue_depth"`
+	Status        string     `json:"status"`
+	UptimeSec     int64      `json:"uptime_sec"`
+	WorkersActive int        `json:"workers_active"`
+	QueueDepth    int        `json:"queue_depth"`
+	WarmWorkers   warmStatus `json:"warm_workers"`
 }
 
 func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 	activeTasks := d.queue.List(false)
+	total, ready, busy := d.workerPool.WarmStatus()
 	resp := healthResponse{
 		Status:        "ok",
 		UptimeSec:     int64(time.Since(d.startTime).Seconds()),
 		WorkersActive: d.workerPool.Active(),
 		QueueDepth:    len(activeTasks),
+		WarmWorkers:   warmStatus{Total: total, Ready: ready, Busy: busy},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -321,6 +336,7 @@ type submitTaskRequest struct {
 	Priority    int    `json:"priority"`
 	AllowWrites bool   `json:"allow_writes"`
 	TimeoutSec  int    `json:"timeout_sec"`
+	Warm        bool   `json:"warm"`
 }
 
 func (d *Daemon) handleSubmitTask(w http.ResponseWriter, r *http.Request) {
@@ -337,7 +353,7 @@ func (d *Daemon) handleSubmitTask(w http.ResponseWriter, r *http.Request) {
 		req.TimeoutSec = d.cfg.DefaultTimeoutSec
 	}
 
-	task, err := d.queue.Submit(req.Prompt, req.ReplyTo, req.Priority, req.AllowWrites, req.TimeoutSec, false)
+	task, err := d.queue.Submit(req.Prompt, req.ReplyTo, req.Priority, req.AllowWrites, req.TimeoutSec, req.Warm)
 	if err != nil {
 		http.Error(w, `{"error":"failed to submit task"}`, http.StatusInternalServerError)
 		return
