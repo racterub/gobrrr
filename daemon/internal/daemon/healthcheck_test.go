@@ -16,7 +16,7 @@ func timePtr(t time.Time) *time.Time {
 
 func TestHealthCheckerStuckTask(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "q.json"))
-	task, err := q.Submit("test", "telegram", 1, false, 1) // 1 second timeout
+	task, err := q.Submit("test", "telegram", 1, false, 1, false) // 1 second timeout
 	require.NoError(t, err)
 
 	_, err = q.Next() // mark running
@@ -36,7 +36,7 @@ func TestHealthCheckerStuckTask(t *testing.T) {
 func TestHealthCheckerAllFailed(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "q.json"))
 	for i := 0; i < 10; i++ {
-		_, err := q.Submit("test", "telegram", 1, false, 300)
+		_, err := q.Submit("test", "telegram", 1, false, 300, false)
 		require.NoError(t, err)
 		task, err := q.Next()
 		require.NoError(t, err)
@@ -59,7 +59,7 @@ func TestHealthCheckerPartialFailures(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "q.json"))
 	// Submit 9 failed + 1 completed — should be healthy
 	for i := 0; i < 9; i++ {
-		_, err := q.Submit("test", "telegram", 1, false, 300)
+		_, err := q.Submit("test", "telegram", 1, false, 300, false)
 		require.NoError(t, err)
 		task, err := q.Next()
 		require.NoError(t, err)
@@ -67,7 +67,7 @@ func TestHealthCheckerPartialFailures(t *testing.T) {
 		require.NoError(t, err)
 	}
 	// One success
-	_, err := q.Submit("test", "telegram", 1, false, 300)
+	_, err := q.Submit("test", "telegram", 1, false, 300, false)
 	require.NoError(t, err)
 	task, err := q.Next()
 	require.NoError(t, err)

@@ -21,6 +21,7 @@ type Task struct {
 	Priority    int               `json:"priority"`
 	ReplyTo     string            `json:"reply_to"`
 	AllowWrites bool              `json:"allow_writes"`
+	Warm        bool              `json:"warm"`
 	CreatedAt   time.Time         `json:"created_at"`
 	StartedAt   *time.Time        `json:"started_at"`
 	CompletedAt *time.Time        `json:"completed_at"`
@@ -89,7 +90,7 @@ func LoadQueue(path string) (*Queue, error) {
 }
 
 // Submit adds a new task to the queue and persists the queue to disk.
-func (q *Queue) Submit(prompt, replyTo string, priority int, allowWrites bool, timeoutSec int) (*Task, error) {
+func (q *Queue) Submit(prompt, replyTo string, priority int, allowWrites bool, timeoutSec int, warm bool) (*Task, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -102,6 +103,7 @@ func (q *Queue) Submit(prompt, replyTo string, priority int, allowWrites bool, t
 		Priority:    priority,
 		ReplyTo:     replyTo,
 		AllowWrites: allowWrites,
+		Warm:        warm,
 		CreatedAt:   time.Now(),
 		TimeoutSec:  timeoutSec,
 		Metadata:    map[string]string{},

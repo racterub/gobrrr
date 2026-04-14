@@ -77,7 +77,7 @@ func TestWorkerPoolConcurrencyLimit(t *testing.T) {
 
 	// Submit 4 tasks — more than maxWorkers.
 	for i := 0; i < 4; i++ {
-		_, err := q.Submit("test prompt", "", 0, false, 10)
+		_, err := q.Submit("test prompt", "", 0, false, 10, false)
 		require.NoError(t, err)
 	}
 
@@ -142,7 +142,7 @@ func TestWorkerPoolTaskResultStored(t *testing.T) {
 		}
 	}
 
-	task, err := q.Submit("test prompt", "", 0, false, 5)
+	task, err := q.Submit("test prompt", "", 0, false, 5, false)
 	require.NoError(t, err)
 	taskID := task.ID
 

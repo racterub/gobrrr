@@ -18,7 +18,7 @@ import (
 func TestSubmitTaskGetsQueuedStatus(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
 
-	task, err := q.Submit("do something", "telegram", 5, false, 300)
+	task, err := q.Submit("do something", "telegram", 5, false, 300, false)
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, task.ID)
@@ -39,9 +39,9 @@ func TestSubmitTaskGetsQueuedStatus(t *testing.T) {
 func TestListDefaultReturnsActiveOnly(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
 
-	t1, err := q.Submit("task 1", "", 5, false, 300)
+	t1, err := q.Submit("task 1", "", 5, false, 300, false)
 	require.NoError(t, err)
-	t2, err := q.Submit("task 2", "", 5, false, 300)
+	t2, err := q.Submit("task 2", "", 5, false, 300, false)
 	require.NoError(t, err)
 
 	// Complete t1
@@ -60,9 +60,9 @@ func TestListDefaultReturnsActiveOnly(t *testing.T) {
 func TestListAllIncludesCompleted(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
 
-	t1, err := q.Submit("task 1", "", 5, false, 300)
+	t1, err := q.Submit("task 1", "", 5, false, 300, false)
 	require.NoError(t, err)
-	t2, err := q.Submit("task 2", "", 5, false, 300)
+	t2, err := q.Submit("task 2", "", 5, false, 300, false)
 	require.NoError(t, err)
 
 	// Complete t1 and fail t2
@@ -86,11 +86,11 @@ func TestNextReturnsPriorityOrder(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
 
 	// Priority 10 = lower priority (higher number = lower priority)
-	_, err := q.Submit("low priority", "", 10, false, 300)
+	_, err := q.Submit("low priority", "", 10, false, 300, false)
 	require.NoError(t, err)
 
 	// Priority 1 = highest priority
-	high, err := q.Submit("high priority", "", 1, false, 300)
+	high, err := q.Submit("high priority", "", 1, false, 300, false)
 	require.NoError(t, err)
 
 	next, err := q.Next()
@@ -105,11 +105,11 @@ func TestNextReturnsPriorityOrder(t *testing.T) {
 func TestNextReturnsFIFOForEqualPriority(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
 
-	first, err := q.Submit("first", "", 5, false, 300)
+	first, err := q.Submit("first", "", 5, false, 300, false)
 	require.NoError(t, err)
 	// Ensure different timestamps
 	time.Sleep(2 * time.Millisecond)
-	_, err = q.Submit("second", "", 5, false, 300)
+	_, err = q.Submit("second", "", 5, false, 300, false)
 	require.NoError(t, err)
 
 	next, err := q.Next()
@@ -133,7 +133,7 @@ func TestNextReturnsNilWhenQueueEmpty(t *testing.T) {
 func TestCompleteUpdatesStatusAndTimestamp(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
 
-	task, err := q.Submit("work", "", 5, false, 300)
+	task, err := q.Submit("work", "", 5, false, 300, false)
 	require.NoError(t, err)
 
 	_, err = q.Next()
@@ -155,7 +155,7 @@ func TestCompleteUpdatesStatusAndTimestamp(t *testing.T) {
 func TestFailUpdatesStatusAndTimestamp(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
 
-	task, err := q.Submit("work", "", 5, false, 300)
+	task, err := q.Submit("work", "", 5, false, 300, false)
 	require.NoError(t, err)
 
 	_, err = q.Next()
@@ -176,7 +176,7 @@ func TestPersistAndReload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "queue.json")
 	q := daemon.NewQueue(path)
 
-	task, err := q.Submit("persisted task", "telegram", 3, true, 120)
+	task, err := q.Submit("persisted task", "telegram", 3, true, 120, false)
 	require.NoError(t, err)
 
 	q2, err := daemon.LoadQueue(path)
@@ -200,7 +200,7 @@ func TestAtomicWrite(t *testing.T) {
 	path := filepath.Join(dir, "queue.json")
 	q := daemon.NewQueue(path)
 
-	_, err := q.Submit("task", "", 5, false, 300)
+	_, err := q.Submit("task", "", 5, false, 300, false)
 	require.NoError(t, err)
 
 	_, statErr := os.Stat(path)
@@ -216,7 +216,7 @@ func TestCrashRecoveryResetsRunningToQueued(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "queue.json")
 	q := daemon.NewQueue(path)
 
-	task, err := q.Submit("crash me", "", 5, false, 300)
+	task, err := q.Submit("crash me", "", 5, false, 300, false)
 	require.NoError(t, err)
 
 	// Mark as running (simulating worker picked it up before crash)
@@ -238,7 +238,7 @@ func TestCrashRecoveryResetsRunningToQueued(t *testing.T) {
 func TestPruneRemovesOldCompleted(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
 
-	t1, err := q.Submit("old task", "", 5, false, 300)
+	t1, err := q.Submit("old task", "", 5, false, 300, false)
 	require.NoError(t, err)
 	_, err = q.Next()
 	require.NoError(t, err)
@@ -260,7 +260,7 @@ func TestPruneRemovesOldCompleted(t *testing.T) {
 func TestPruneKeepsRecentCompleted(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
 
-	t1, err := q.Submit("recent task", "", 5, false, 300)
+	t1, err := q.Submit("recent task", "", 5, false, 300, false)
 	require.NoError(t, err)
 	_, err = q.Next()
 	require.NoError(t, err)
@@ -281,7 +281,7 @@ func TestRecentCompleted(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
 
 	for i := 0; i < 5; i++ {
-		task, err := q.Submit(fmt.Sprintf("task %d", i), "", 5, false, 300)
+		task, err := q.Submit(fmt.Sprintf("task %d", i), "", 5, false, 300, false)
 		require.NoError(t, err)
 		_, err = q.Next()
 		require.NoError(t, err)
@@ -314,7 +314,7 @@ func TestTaskDeliveredFieldPersistence(t *testing.T) {
 	dir := t.TempDir()
 	q := daemon.NewQueue(filepath.Join(dir, "queue.json"))
 
-	task, err := q.Submit("test prompt", "channel", 0, false, 300)
+	task, err := q.Submit("test prompt", "channel", 0, false, 300, false)
 	require.NoError(t, err)
 
 	err = q.Complete(task.ID, "result")
@@ -338,7 +338,7 @@ func TestLoadQueueCrashRecoveryFlushesToDisk(t *testing.T) {
 	q := daemon.NewQueue(queuePath)
 
 	// Submit and start a task (moves to running)
-	task, err := q.Submit("crash test", "stdout", 0, false, 300)
+	task, err := q.Submit("crash test", "stdout", 0, false, 300, false)
 	require.NoError(t, err)
 	next, err := q.Next()
 	require.NoError(t, err)
@@ -365,7 +365,7 @@ func TestLoadQueueCrashRecoveryFlushesToDisk(t *testing.T) {
 func TestCancelTask(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
 
-	task, err := q.Submit("cancel me", "", 5, false, 300)
+	task, err := q.Submit("cancel me", "", 5, false, 300, false)
 	require.NoError(t, err)
 
 	err = q.Cancel(task.ID)
@@ -374,4 +374,13 @@ func TestCancelTask(t *testing.T) {
 	got, err := q.Get(task.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "cancelled", got.Status)
+}
+
+func TestSubmitWarmTask(t *testing.T) {
+	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
+
+	task, err := q.Submit("quick lookup", "telegram", 5, false, 300, true)
+	require.NoError(t, err)
+
+	assert.True(t, task.Warm, "task should be marked warm")
 }

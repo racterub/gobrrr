@@ -132,7 +132,7 @@ func New(cfg *config.Config, socket string) *Daemon {
 	// Scheduler
 	schedulerPath := filepath.Join(gobrrDir, "schedules.json")
 	d.scheduler = scheduler.New(schedulerPath, func(prompt, replyTo string, allowWrites bool) error {
-		_, err := d.queue.Submit(prompt, replyTo, 5, allowWrites, cfg.DefaultTimeoutSec)
+		_, err := d.queue.Submit(prompt, replyTo, 5, allowWrites, cfg.DefaultTimeoutSec, false)
 		return err
 	})
 	if err := d.scheduler.Load(); err != nil {
@@ -337,7 +337,7 @@ func (d *Daemon) handleSubmitTask(w http.ResponseWriter, r *http.Request) {
 		req.TimeoutSec = d.cfg.DefaultTimeoutSec
 	}
 
-	task, err := d.queue.Submit(req.Prompt, req.ReplyTo, req.Priority, req.AllowWrites, req.TimeoutSec)
+	task, err := d.queue.Submit(req.Prompt, req.ReplyTo, req.Priority, req.AllowWrites, req.TimeoutSec, false)
 	if err != nil {
 		http.Error(w, `{"error":"failed to submit task"}`, http.StatusInternalServerError)
 		return
