@@ -384,3 +384,30 @@ func TestSubmitWarmTask(t *testing.T) {
 
 	assert.True(t, task.Warm, "task should be marked warm")
 }
+
+func TestNextWarmSkipsColdTasks(t *testing.T) {
+	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
+
+	_, err := q.Submit("cold task", "telegram", 5, false, 300, false)
+	require.NoError(t, err)
+	warm, err := q.Submit("warm task", "telegram", 5, false, 300, true)
+	require.NoError(t, err)
+
+	task, err := q.NextWarm()
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	assert.Equal(t, warm.ID, task.ID)
+	assert.True(t, task.Warm)
+	assert.Equal(t, "running", task.Status)
+}
+
+func TestNextWarmReturnsNilWhenNoWarmTasks(t *testing.T) {
+	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
+
+	_, err := q.Submit("cold task", "telegram", 5, false, 300, false)
+	require.NoError(t, err)
+
+	task, err := q.NextWarm()
+	require.NoError(t, err)
+	assert.Nil(t, task)
+}

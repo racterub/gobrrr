@@ -161,6 +161,45 @@ func (q *Queue) Next() (*Task, error) {
 	return best, nil
 }
 
+// NextWarm returns the next queued task with Warm=true (highest priority, then
+// FIFO) and marks it as running. Returns nil if no warm tasks are queued.
+func (q *Queue) NextWarm() (*Task, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	var best *Task
+	for _, t := range q.tasks {
+		if t.Status != "queued" || !t.Warm {
+			continue
+		}
+		if best == nil {
+			best = t
+			continue
+		}
+		if t.Priority < best.Priority {
+			best = t
+		} else if t.Priority == best.Priority && t.CreatedAt.Before(best.CreatedAt) {
+			best = t
+		}
+	}
+
+	if best == nil {
+		return nil, nil
+	}
+
+	now := time.Now()
+	best.Status = "running"
+	best.StartedAt = &now
+
+	if err := q.flush(); err != nil {
+		best.Status = "queued"
+		best.StartedAt = nil
+		return nil, fmt.Errorf("persisting queue: %w", err)
+	}
+
+	return best, nil
+}
+
 // Complete marks the task with the given ID as completed with the provided
 // result string and persists.
 func (q *Queue) Complete(id, result string) error {
