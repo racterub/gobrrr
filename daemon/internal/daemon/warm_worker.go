@@ -161,13 +161,21 @@ func (ww *WarmWorker) Stop() {
 // The caller must Reserve() before calling Run() and Release() after.
 // Run does not manage the busy flag.
 func (ww *WarmWorker) Run(task *Task) (string, error) {
+	ww.mu.Lock()
+	stdin, scanner := ww.stdin, ww.scanner
+	ready := ww.ready
+	ww.mu.Unlock()
+	if !ready || stdin == nil || scanner == nil {
+		return "", fmt.Errorf("warm worker %d: not ready", ww.id)
+	}
+
 	prompt := ww.buildTaskPrompt(task.Prompt)
 
-	if err := writeUserMessage(ww.stdin, prompt); err != nil {
+	if err := writeUserMessage(stdin, prompt); err != nil {
 		return "", fmt.Errorf("warm worker %d: write: %w", ww.id, err)
 	}
 
-	result, err := readUntilResult(ww.scanner)
+	result, err := readUntilResult(scanner)
 	if err != nil {
 		return "", fmt.Errorf("warm worker %d: read: %w", ww.id, err)
 	}
