@@ -21,7 +21,6 @@ func startGmailTestDaemon(t *testing.T) (*http.Client, func()) {
 	t.Helper()
 	socketPath := filepath.Join(t.TempDir(), "test-gmail.sock")
 	cfg := config.Default()
-	cfg.WarmWorkers = 0
 	d := daemon.New(cfg, socketPath)
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -236,18 +236,24 @@ func (wp *WorkerPool) StartWarm(ctx context.Context) error {
 		if wp.warmCommand != "" {
 			ww.command = wp.warmCommand
 		}
+		// ww.Start takes 7-12s — do not hold wp.mu across it.
 		if err := ww.Start(ctx); err != nil {
 			log.Printf("warm worker %d: failed to start: %v", i, err)
 			continue
 		}
+		wp.mu.Lock()
 		wp.warmWorkers = append(wp.warmWorkers, ww)
+		wp.mu.Unlock()
 	}
 	return nil
 }
 
 // reserveWarmWorker finds an idle warm worker and atomically reserves it.
 func (wp *WorkerPool) reserveWarmWorker() *WarmWorker {
-	for _, ww := range wp.warmWorkers {
+	wp.mu.Lock()
+	workers := append([]*WarmWorker(nil), wp.warmWorkers...)
+	wp.mu.Unlock()
+	for _, ww := range workers {
 		if ww.Reserve() {
 			return ww
 		}
@@ -257,7 +263,10 @@ func (wp *WorkerPool) reserveWarmWorker() *WarmWorker {
 
 // WarmStatus returns the total, ready, and busy counts for warm workers.
 func (wp *WorkerPool) WarmStatus() (total, ready, busy int) {
-	for _, ww := range wp.warmWorkers {
+	wp.mu.Lock()
+	workers := append([]*WarmWorker(nil), wp.warmWorkers...)
+	wp.mu.Unlock()
+	for _, ww := range workers {
 		total++
 		ww.mu.Lock()
 		if ww.ready {

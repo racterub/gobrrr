@@ -166,7 +166,7 @@ func (ww *WarmWorker) Run(task *Task) (string, error) {
 	ready := ww.ready
 	ww.mu.Unlock()
 	if !ready || stdin == nil || scanner == nil {
-		return "", fmt.Errorf("warm worker %d: not ready", ww.id)
+		return "", fmt.Errorf("warm worker %d: not ready (worker stopped or shutdown in progress)", ww.id)
 	}
 
 	prompt := ww.buildTaskPrompt(task.Prompt)

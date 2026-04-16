@@ -45,7 +45,6 @@ func waitForSocket(t *testing.T, path string, timeout time.Duration) {
 func TestDaemonStartsAndListens(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "test.sock")
 	cfg := config.Default()
-	cfg.WarmWorkers = 0
 	d := daemon.New(cfg, socketPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -65,7 +64,6 @@ func TestDaemonStartsAndListens(t *testing.T) {
 func TestHealthEndpoint(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "test.sock")
 	cfg := config.Default()
-	cfg.WarmWorkers = 0
 	d := daemon.New(cfg, socketPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -90,12 +88,17 @@ func TestHealthEndpoint(t *testing.T) {
 	assert.Contains(t, body, "uptime_sec")
 	assert.Contains(t, body, "workers_active")
 	assert.Contains(t, body, "queue_depth")
+	assert.Contains(t, body, "warm_workers")
+	warm, ok := body["warm_workers"].(map[string]interface{})
+	require.True(t, ok, "warm_workers should be an object")
+	assert.Contains(t, warm, "total")
+	assert.Contains(t, warm, "ready")
+	assert.Contains(t, warm, "busy")
 }
 
 func TestHealthEndpointContentType(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "test.sock")
 	cfg := config.Default()
-	cfg.WarmWorkers = 0
 	d := daemon.New(cfg, socketPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -116,7 +119,6 @@ func TestHealthEndpointContentType(t *testing.T) {
 func TestUnknownRouteReturns404(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "test.sock")
 	cfg := config.Default()
-	cfg.WarmWorkers = 0
 	d := daemon.New(cfg, socketPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -137,7 +139,6 @@ func TestUnknownRouteReturns404(t *testing.T) {
 func TestGracefulShutdownOnContextCancel(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "test.sock")
 	cfg := config.Default()
-	cfg.WarmWorkers = 0
 	d := daemon.New(cfg, socketPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -162,7 +163,6 @@ func TestGracefulShutdownOnContextCancel(t *testing.T) {
 func TestSocketPermissions(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "test.sock")
 	cfg := config.Default()
-	cfg.WarmWorkers = 0
 	d := daemon.New(cfg, socketPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -188,7 +188,6 @@ func TestStaleSocketRemoved(t *testing.T) {
 	f.Close()
 
 	cfg := config.Default()
-	cfg.WarmWorkers = 0
 	d := daemon.New(cfg, socketPath)
 
 	ctx, cancel := context.WithCancel(context.Background())

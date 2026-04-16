@@ -22,7 +22,6 @@ func startCalendarTestDaemon(t *testing.T) (*http.Client, func()) {
 	t.Helper()
 	socketPath := filepath.Join(t.TempDir(), "test-gcal.sock")
 	cfg := config.Default()
-	cfg.WarmWorkers = 0
 	d := daemon.New(cfg, socketPath)
 
 	ctx, cancel := context.WithCancel(context.Background())

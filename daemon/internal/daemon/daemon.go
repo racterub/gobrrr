@@ -196,10 +196,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Start systemd watchdog (no-op if NOTIFY_SOCKET is not set).
 	go StartWatchdog(ctx)
 
-	// Start warm workers (pre-spawn for sub-second dispatch).
-	if err := d.workerPool.StartWarm(ctx); err != nil {
-		log.Printf("warm pool: startup error: %v", err)
-	}
+	// Start warm workers asynchronously — socket must bind immediately, warm pool
+	// pre-spawn takes 7-12s per worker which would otherwise delay startup.
+	go d.workerPool.StartWarm(ctx)
 
 	// Start the worker pool in the background.
 	go d.workerPool.Run(ctx)
@@ -336,7 +335,9 @@ type submitTaskRequest struct {
 	Priority    int    `json:"priority"`
 	AllowWrites bool   `json:"allow_writes"`
 	TimeoutSec  int    `json:"timeout_sec"`
-	Warm        bool   `json:"warm"`
+	// Warm, when true, requests warm-pool dispatch. This is a hint, not a guarantee —
+	// if no warm worker is free, the task falls through to cold spawn.
+	Warm bool `json:"warm"`
 }
 
 func (d *Daemon) handleSubmitTask(w http.ResponseWriter, r *http.Request) {
