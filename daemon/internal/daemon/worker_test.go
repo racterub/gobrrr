@@ -236,7 +236,7 @@ done
 	defer cancel()
 
 	// Start warm workers.
-	require.NoError(t, pool.StartWarm(ctx))
+	pool.StartWarm(ctx)
 
 	// Submit a warm task.
 	task, err := q.Submit("warm prompt", "", 0, false, 10, true)

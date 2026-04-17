@@ -224,8 +224,8 @@ func (wp *WorkerPool) buildFullPrompt(taskPrompt string) string {
 	return identity.BuildPrompt(ident, memContents, taskPrompt)
 }
 
-// StartWarm pre-spawns warm workers. Call before Run().
-func (wp *WorkerPool) StartWarm(ctx context.Context) error {
+// StartWarm pre-spawns warm workers. Safe to call concurrently with Run().
+func (wp *WorkerPool) StartWarm(ctx context.Context) {
 	warmCount := 0
 	if wp.cfg != nil {
 		warmCount = wp.cfg.WarmWorkers
@@ -245,7 +245,6 @@ func (wp *WorkerPool) StartWarm(ctx context.Context) error {
 		wp.warmWorkers = append(wp.warmWorkers, ww)
 		wp.mu.Unlock()
 	}
-	return nil
 }
 
 // reserveWarmWorker finds an idle warm worker and atomically reserves it.
