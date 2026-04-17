@@ -401,6 +401,25 @@ func TestNextWarmSkipsColdTasks(t *testing.T) {
 	assert.Equal(t, "running", task.Status)
 }
 
+func TestNextWarmSkipsWriteTasks(t *testing.T) {
+	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
+
+	// Submit a warm task that requires writes.
+	_, err := q.Submit("warm write task", "telegram", 5, true, 300, true)
+	require.NoError(t, err)
+
+	// NextWarm must skip it — warm workers can't enforce AllowWrites.
+	task, err := q.NextWarm()
+	require.NoError(t, err)
+	assert.Nil(t, task, "warm task with AllowWrites should not be returned by NextWarm")
+
+	// Next (cold path) should still pick it up.
+	task, err = q.Next()
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	assert.Equal(t, "warm write task", task.Prompt)
+}
+
 func TestNextWarmReturnsNilWhenNoWarmTasks(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
 

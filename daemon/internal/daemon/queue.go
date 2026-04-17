@@ -169,7 +169,9 @@ func (q *Queue) NextWarm() (*Task, error) {
 
 	var best *Task
 	for _, t := range q.tasks {
-		if t.Status != "queued" || !t.Warm {
+		// Warm workers run without per-task permission sandboxing, so tasks
+		// requiring writes must go through cold dispatch which enforces AllowWrites.
+		if t.Status != "queued" || !t.Warm || t.AllowWrites {
 			continue
 		}
 		if best == nil {
