@@ -113,13 +113,8 @@ func (ww *WarmWorker) Start(ctx context.Context) error {
 	ww.scanner = bufio.NewScanner(stdout)
 	ww.scanner.Buffer(make([]byte, 0, 4096), 10*1024*1024) // max 10MB per line
 
-	// Read until system/init.
-	if err := readUntilInit(ww.scanner); err != nil {
-		ww.killLocked()
-		return fmt.Errorf("warm worker %d: init: %w", ww.id, err)
-	}
-
-	// Send identity as the first message.
+	// Send identity as the first message. Claude does not emit system/init
+	// until it receives the first stdin message, so we must write before reading.
 	ident, err := identity.Load(ww.gobrrDir)
 	if err != nil {
 		ww.killLocked()
@@ -132,7 +127,13 @@ func (ww *WarmWorker) Start(ctx context.Context) error {
 		return fmt.Errorf("warm worker %d: identity send: %w", ww.id, err)
 	}
 
-	// Read until result (discard the ack).
+	// Read system/init (emitted after claude receives the first message).
+	if err := readUntilInit(ww.scanner); err != nil {
+		ww.killLocked()
+		return fmt.Errorf("warm worker %d: init: %w", ww.id, err)
+	}
+
+	// Read until result (discard the identity ack).
 	if _, err := readUntilResult(ww.scanner); err != nil {
 		ww.killLocked()
 		return fmt.Errorf("warm worker %d: identity ack: %w", ww.id, err)
