@@ -100,6 +100,7 @@ var (
 	submitPriority    int
 	submitAllowWrites bool
 	submitTimeout     int
+	submitWarm        bool
 )
 
 var submitCmd = &cobra.Command{
@@ -110,7 +111,7 @@ var submitCmd = &cobra.Command{
 			return fmt.Errorf("--prompt is required")
 		}
 		c := newClient()
-		task, err := c.SubmitTask(submitPrompt, submitReplyTo, submitPriority, submitAllowWrites, submitTimeout)
+		task, err := c.SubmitTask(submitPrompt, submitReplyTo, submitPriority, submitAllowWrites, submitTimeout, submitWarm)
 		if err != nil {
 			return err
 		}
@@ -721,6 +722,7 @@ func init() {
 	submitCmd.Flags().IntVar(&submitPriority, "priority", 5, "Task priority (lower = higher priority)")
 	submitCmd.Flags().BoolVar(&submitAllowWrites, "allow-writes", false, "Allow file writes")
 	submitCmd.Flags().IntVar(&submitTimeout, "timeout", 300, "Timeout in seconds")
+	submitCmd.Flags().BoolVar(&submitWarm, "warm", false, "Route to warm worker for fast dispatch")
 
 	listCmd.Flags().BoolVar(&listAll, "all", false, "Include completed/failed tasks")
 
