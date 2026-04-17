@@ -39,45 +39,39 @@ The `channel/index.ts` Bun MCP process consumed all available memory (31GB) on t
 - Confirm scope of removal — full removal vs keeping any wrappers
 - Whether to keep `internal/crypto/` for other future credential storage needs
 
-## Warm Worker Pool
+## Warm Worker Pool Follow-ups
 
-Currently each task spawns a cold `claude --print` process (~7-12s startup). A warm worker pool would keep Claude sessions alive and route tasks to them, reducing dispatch latency to sub-second for simple tasks.
+The warm worker pool (branch `feature/warm-worker-pool`) is implemented. These are deferred improvements surfaced during code review.
 
-### Design
+### Add timeout to warm worker Run() dispatch
 
-Maintain N idle Claude processes (default 1) running in `--input-format stream-json --output-format stream-json` mode. Tasks are piped in via stdin, results read from stdout. Sessions stay alive between tasks.
+Warm worker `Run()` has no per-task timeout — if the Claude process hangs, `readUntilResult` blocks forever on `scanner.Scan()`. Cold workers have timeout handling via `time.NewTimer`. The warm path should respect `task.TimeoutSec`.
 
-### Key decisions needed
+**Files:** `internal/daemon/warm_worker.go` (Run method), `internal/daemon/warm_worker_test.go`
 
-- **Session mode**: `claude` supports `--input-format stream-json` for persistent stdin/stdout sessions. Verify this works for sequential task execution without state leaking between tasks.
-- **Identity reset**: Each task needs fresh identity + memory injection. Can we send a system prompt per-message in stream mode, or do we need to reset the session?
-- **Concurrency**: Warm workers handle one task at a time. For concurrent tasks, keep both warm (fast) and cold (overflow) pools.
-- **Idle timeout**: Kill idle warm workers after N minutes to free memory. Respawn on next task.
-- **Error recovery**: If a warm worker crashes or hangs, fall back to cold spawn.
+### Encapsulate WarmWorker state access in WarmStatus
 
-### Architecture sketch
+`WorkerPool.WarmStatus()` reaches directly into `ww.mu` to read `ready`/`busy` fields, breaking encapsulation. Add a `Status() (ready, busy bool)` method to `WarmWorker` and call it from `WarmStatus()`.
 
-```
-Task submitted
-  ├─ Warm worker available? → pipe task to warm worker (~0.5s)
-  └─ No warm worker? → cold spawn claude --print (~7-12s)
-```
+**Files:** `internal/daemon/warm_worker.go`, `internal/daemon/worker.go` (WarmStatus method)
 
-### Implementation steps
+### Add WarmWorkers default to config test
 
-1. Research `claude --input-format stream-json` protocol — message format, session state, error handling
-2. Add `WarmWorker` struct managing a persistent `exec.Cmd` with stdin/stdout pipes
-3. Add `WarmPool` with configurable pool size, idle timeout, health checks
-4. Route `WorkerPool.Run()` to prefer warm workers, fall back to cold
-5. Add config: `warm_workers: 1`, `warm_idle_timeout_min: 30`
-6. Test with sequential tasks, verify no state leakage between tasks
+`TestDefaultConfig` in `config_test.go` was not updated to verify `WarmWorkers: 1`.
 
-### Constraints
+**Files:** `internal/config/config_test.go`
 
-- Must not leak context between tasks (security)
-- Must handle worker crashes gracefully
-- Memory budget: each warm Claude session uses ~200-400MB
-- On 4CPU/8GB LXC, max 1-2 warm workers realistically
+### Warm worker subprocess leak on context cancellation during init
+
+`WarmWorker.Start` uses `exec.Command` instead of `exec.CommandContext`. The ctx-done cleanup goroutine only registers after the init handshake completes, so if context is cancelled mid-init, the subprocess is orphaned. Switch to `exec.CommandContext` to fix.
+
+**Files:** `internal/daemon/warm_worker.go` (Start method)
+
+### Add malformed NDJSON line handling to protocol readers
+
+`readUntilInit` and `readUntilResult` silently skip lines that fail `json.Unmarshal`. If Claude emits consistently malformed output, the reader spins until EOF. Consider logging or limiting consecutive parse failures.
+
+**Files:** `internal/daemon/warm_proto.go`
 
 ## Worker Permission Enforcement
 
@@ -90,4 +84,76 @@ Task submitted
 ### Next step
 
 - **Source code research needed for Claude Code permission architecture.** Dig through `claude-code/src` to find whether there is any supported way to have `--settings` *override* user settings while keeping OAuth, or to otherwise scope worker permissions without switching to API-key auth. If none exists, fall back to documenting the limitation and relying on the confirmation gate (`security/confirm.go`) as the real backstop, plus the workspace-CWD boundary from the CWD mismatch fix.
+
+## Teach Telegram session to dispatch via gobrrr warm/cold workers — 2026-04-13
+
+**What:** Update the Telegram session's instructions so the Claude instance acting as dispatcher knows how to use `gobrrr submit` to dispatch tasks, and understands when to route with `--warm` (simple/fast tasks like lookups, short answers, memory queries) vs cold spawn (complex/multi-step tasks requiring tool use, file editing, or isolation).
+
+**Why:** The warm worker pool (being designed now) is useless if the Telegram session doesn't know how to use it. Currently there are no dispatch instructions — the session needs prompting guidance to make good warm vs cold routing decisions.
+
+**Files / docs:**
+- `~/.claude/CLAUDE.md` on remote (claude-agent) — session-level instructions
+- `~/.gobrrr/identity.md` on remote — assistant identity, may need dispatch guidance
+- `docs/superpowers/specs/2026-04-13-warm-worker-pool-design.md` — warm pool spec (being written)
+- Existing gobrrr CLI: `daemon/cmd/gobrrr/main.go` — `submit` subcommand, `--warm` flag (to be added)
+
+**Constraints:**
+- Must be prompt/instruction changes only, no code changes
+- Warm pool must be implemented first — this TODO depends on the warm worker pool being functional
+- Instructions should be concrete with examples, not vague ("use --warm for simple tasks" isn't enough)
+- Should include fallback guidance: if warm worker is unavailable, fall back to cold
+
+**Acceptance criteria:**
+- [ ] Telegram session correctly routes simple tasks to `gobrrr submit --warm`
+- [ ] Telegram session correctly routes complex tasks to `gobrrr submit` (cold)
+- [ ] Session handles warm worker unavailability gracefully (falls back to cold)
+- [ ] Dispatch guidance documented in session instructions with concrete examples
+
+**Out of scope:**
+- Implementing the warm worker pool itself (separate task)
+- Auto-detection/heuristic routing (dispatcher decides explicitly)
+- Changing the gobrrr CLI interface beyond adding `--warm`
+
+**Estimated effort:** small — prompt/instruction writing, 1-2 files on the remote system
+
+**Start by:** Wait for warm worker pool to be implemented, then read the current `~/.claude/CLAUDE.md` and `~/.gobrrr/identity.md` on remote to understand existing session instructions before adding dispatch guidance
+
+## Adopt ClaudeClaw plugin distribution model — 2026-04-12
+
+**What:** Package gobrrr as a Claude Code plugin installable via `claude plugin marketplace add racterub/gobrrr` with a `/gobrrr:start` setup wizard skill, replacing the current build-from-source + systemd manual setup. The Go daemon, parallel worker dispatch, security model (UNTRUSTED boundaries, per-task permission sandboxing, credential leak detection), and memory injection remain unchanged — this is a distribution and setup UX change, not a runtime architecture change.
+
+**Why:** ClaudeClaw achieves 5-minute install via the Claude Code plugin marketplace while gobrrr requires cloning the repo, building a Go binary, configuring systemd, and manually editing config files. This friction is the biggest barrier to gobrrr being usable beyond the author's own machine. Triggered by a direct comparison with [ClaudeClaw](https://github.com/moazbuilds/claudeclaw) which solves overlapping problems with a much better onboarding experience.
+
+**Files / docs:**
+- `daemon/cmd/gobrrr/main.go` — CLI entrypoint, may need plugin lifecycle hooks
+- `daemon/internal/setup/` — existing setup wizard, needs to become a `/gobrrr:start` skill
+- `daemon/systemd/gobrrr.service` — current systemd unit, plugin model may change how the daemon is managed
+- `daemon/scripts/setup.sh` — current install script, to be replaced or wrapped by plugin install
+- `docs/specs/2026-03-23-gobrrr-design.md` — design spec to update with plugin distribution model
+- Reference: ClaudeClaw's plugin structure at `moazbuilds/claudeclaw` for marketplace packaging conventions
+
+**Constraints:**
+- Must remain a single static Go binary (`CGO_ENABLED=0`) — the plugin wraps the binary, doesn't replace it
+- Must keep Claude Max subscription auth (no API keys)
+- Must preserve the existing security model — plugin packaging must not weaken per-task sandboxing or UNTRUSTED boundaries
+- Plugin must handle building or bundling the Go binary for the target platform
+- Setup wizard must be non-interactive when run as a skill (no stdin prompts)
+
+**Acceptance criteria:**
+- [ ] `claude plugin marketplace add racterub/gobrrr` installs gobrrr
+- [ ] `/gobrrr:start` walks user through config (concurrency, Telegram token, identity) and starts the daemon
+- [ ] Go binary is built or downloaded during plugin install
+- [ ] Existing gobrrr features (parallel dispatch, memory, identity, scheduling) work identically after plugin install
+- [ ] Daemon lifecycle (start/stop/restart) managed through plugin commands, not manual systemd
+
+**Out of scope:**
+- Discord integration (gobrrr is Telegram-only for now)
+- Web dashboard (gobrrr is CLI-only)
+- GLM fallback (gobrrr targets Claude Max only)
+- Changing the Go daemon internals or worker architecture
+- Voice message support
+
+**Estimated effort:** large — requires understanding Claude Code plugin packaging format (undocumented/emerging), restructuring project layout for marketplace distribution, converting the setup wizard to a non-interactive skill, and solving cross-platform binary distribution within the plugin model. Multiple files across build, distribution, and setup code.
+
+**Start by:** Study ClaudeClaw's repo structure to understand how it packages itself as a Claude Code plugin — look at its `package.json`, plugin manifest, and how it registers skills like `/claudeclaw:start`. Then check Claude Code plugin marketplace docs for the packaging contract.
 
