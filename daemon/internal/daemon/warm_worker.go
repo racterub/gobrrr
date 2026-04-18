@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -82,17 +84,62 @@ func (ww *WarmWorker) Start(ctx context.Context) error {
 
 	var cmd *exec.Cmd
 	if ww.command != "claude" {
-		// Test mode: run the mock script directly.
-		cmd = exec.Command("bash", ww.command) //nolint:gosec
+		// Test mode: run the mock script and pass through the same flags that
+		// the real invocation would use, so tests can assert on argv.
+		settingsPath, err := EnsureWarmSettings(ww.gobrrDir)
+		if err != nil {
+			return fmt.Errorf("warm worker %d: ensure warm settings: %w", ww.id, err)
+		}
+		model := "sonnet"
+		mode := "auto"
+		if ww.cfg != nil {
+			if m := ww.cfg.Models.WarmWorker.Model; m != "" {
+				model = m
+			}
+			if pm := ww.cfg.Models.WarmWorker.PermissionMode; pm != "" {
+				mode = pm
+			}
+		}
+		cmd = exec.Command("bash", ww.command, //nolint:gosec
+			"--model", model,
+			"--permission-mode", mode,
+			"--settings", settingsPath,
+		)
 	} else {
+		settingsPath, err := EnsureWarmSettings(ww.gobrrDir)
+		if err != nil {
+			return fmt.Errorf("warm worker %d: ensure warm settings: %w", ww.id, err)
+		}
+		model := "sonnet"
+		mode := "auto"
+		if ww.cfg != nil {
+			if m := ww.cfg.Models.WarmWorker.Model; m != "" {
+				model = m
+			}
+			if pm := ww.cfg.Models.WarmWorker.PermissionMode; pm != "" {
+				mode = pm
+			}
+		}
 		cmd = exec.Command("claude", "-p",
+			"--model", model,
+			"--permission-mode", mode,
+			"--settings", settingsPath,
 			"--input-format", "stream-json",
 			"--output-format", "stream-json",
-			"--dangerously-skip-permissions",
 			"--verbose",
 		)
 	}
 	cmd.Dir = workDir
+
+	logDir := filepath.Join(ww.gobrrDir, "logs")
+	if err := os.MkdirAll(logDir, 0700); err == nil {
+		logPath := filepath.Join(logDir, fmt.Sprintf("warm-%d.log", ww.id))
+		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600); err == nil {
+			cmd.Stderr = logFile
+			// logFile stays open for the lifetime of the process. It is closed
+			// when the process exits via Go's process-cleanup reaper.
+		}
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
