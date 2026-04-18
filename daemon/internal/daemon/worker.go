@@ -180,6 +180,15 @@ func (wp *WorkerPool) defaultBuildCommand(task *Task) *WorkerConfig {
 		"--output-format", "text",
 	}
 
+	if wp.cfg != nil {
+		if m := wp.cfg.Models.ColdWorker.Model; m != "" {
+			args = append(args, "--model", m)
+		}
+		if pm := wp.cfg.Models.ColdWorker.PermissionMode; pm != "" {
+			args = append(args, "--permission-mode", pm)
+		}
+	}
+
 	// Generate per-task settings.json for permission sandboxing.
 	workersDir := filepath.Join(wp.gobrrDir, "workers")
 	if settingsPath, err := security.Generate(workersDir, task.ID, task.AllowWrites); err == nil {

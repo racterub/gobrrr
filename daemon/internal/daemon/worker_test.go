@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -301,4 +302,25 @@ func TestWorkerPoolWarmFallbackToCold(t *testing.T) {
 	assert.Equal(t, "cold fallback\n", *completed.Result)
 
 	cancel()
+}
+
+func TestColdWorkerBuildCommandUsesConfiguredModelAndMode(t *testing.T) {
+	dir := t.TempDir()
+	q := NewQueue(filepath.Join(dir, "queue.json"))
+	cfg := &config.Config{
+		WorkspacePath: dir,
+		Models: config.ModelsConfig{
+			ColdWorker: config.ModelConfig{Model: "opus", PermissionMode: "auto"},
+		},
+	}
+	pool := NewWorkerPool(q, cfg, 1, 0, dir, nil)
+
+	task := &Task{ID: "t_test", Prompt: "hello", TimeoutSec: 10}
+	wc := pool.defaultBuildCommand(task)
+
+	// Expect --model opus --permission-mode auto somewhere in args.
+	joined := strings.Join(wc.Args, " ")
+	assert.Contains(t, joined, "--model opus")
+	assert.Contains(t, joined, "--permission-mode auto")
+	assert.NotContains(t, joined, "--dangerously-skip-permissions")
 }
