@@ -43,16 +43,18 @@ type submitTaskRequest struct {
 	Priority    int    `json:"priority"`
 	AllowWrites bool   `json:"allow_writes"`
 	TimeoutSec  int    `json:"timeout_sec"`
+	Warm        bool   `json:"warm"`
 }
 
 // SubmitTask submits a new task to the daemon and returns the created Task.
-func (c *Client) SubmitTask(prompt, replyTo string, priority int, allowWrites bool, timeoutSec int) (*daemon.Task, error) {
+func (c *Client) SubmitTask(prompt, replyTo string, priority int, allowWrites bool, timeoutSec int, warm bool) (*daemon.Task, error) {
 	body := submitTaskRequest{
 		Prompt:      prompt,
 		ReplyTo:     replyTo,
 		Priority:    priority,
 		AllowWrites: allowWrites,
 		TimeoutSec:  timeoutSec,
+		Warm:        warm,
 	}
 
 	data, err := json.Marshal(body)

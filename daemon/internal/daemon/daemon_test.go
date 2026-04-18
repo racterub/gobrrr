@@ -88,6 +88,12 @@ func TestHealthEndpoint(t *testing.T) {
 	assert.Contains(t, body, "uptime_sec")
 	assert.Contains(t, body, "workers_active")
 	assert.Contains(t, body, "queue_depth")
+	assert.Contains(t, body, "warm_workers")
+	warm, ok := body["warm_workers"].(map[string]interface{})
+	require.True(t, ok, "warm_workers should be an object")
+	assert.Contains(t, warm, "total")
+	assert.Contains(t, warm, "ready")
+	assert.Contains(t, warm, "busy")
 }
 
 func TestHealthEndpointContentType(t *testing.T) {

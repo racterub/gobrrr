@@ -21,6 +21,7 @@ type Task struct {
 	Priority    int               `json:"priority"`
 	ReplyTo     string            `json:"reply_to"`
 	AllowWrites bool              `json:"allow_writes"`
+	Warm        bool              `json:"warm"`
 	CreatedAt   time.Time         `json:"created_at"`
 	StartedAt   *time.Time        `json:"started_at"`
 	CompletedAt *time.Time        `json:"completed_at"`
@@ -89,7 +90,7 @@ func LoadQueue(path string) (*Queue, error) {
 }
 
 // Submit adds a new task to the queue and persists the queue to disk.
-func (q *Queue) Submit(prompt, replyTo string, priority int, allowWrites bool, timeoutSec int) (*Task, error) {
+func (q *Queue) Submit(prompt, replyTo string, priority int, allowWrites bool, timeoutSec int, warm bool) (*Task, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -102,6 +103,7 @@ func (q *Queue) Submit(prompt, replyTo string, priority int, allowWrites bool, t
 		Priority:    priority,
 		ReplyTo:     replyTo,
 		AllowWrites: allowWrites,
+		Warm:        warm,
 		CreatedAt:   time.Now(),
 		TimeoutSec:  timeoutSec,
 		Metadata:    map[string]string{},
@@ -151,6 +153,47 @@ func (q *Queue) Next() (*Task, error) {
 
 	if err := q.flush(); err != nil {
 		// Roll back in-memory state.
+		best.Status = "queued"
+		best.StartedAt = nil
+		return nil, fmt.Errorf("persisting queue: %w", err)
+	}
+
+	return best, nil
+}
+
+// NextWarm returns the next queued task with Warm=true (highest priority, then
+// FIFO) and marks it as running. Returns nil if no warm tasks are queued.
+func (q *Queue) NextWarm() (*Task, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	var best *Task
+	for _, t := range q.tasks {
+		// Warm workers run without per-task permission sandboxing, so tasks
+		// requiring writes must go through cold dispatch which enforces AllowWrites.
+		if t.Status != "queued" || !t.Warm || t.AllowWrites {
+			continue
+		}
+		if best == nil {
+			best = t
+			continue
+		}
+		if t.Priority < best.Priority {
+			best = t
+		} else if t.Priority == best.Priority && t.CreatedAt.Before(best.CreatedAt) {
+			best = t
+		}
+	}
+
+	if best == nil {
+		return nil, nil
+	}
+
+	now := time.Now()
+	best.Status = "running"
+	best.StartedAt = &now
+
+	if err := q.flush(); err != nil {
 		best.Status = "queued"
 		best.StartedAt = nil
 		return nil, fmt.Errorf("persisting queue: %w", err)

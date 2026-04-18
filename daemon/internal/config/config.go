@@ -36,6 +36,7 @@ type Config struct {
 	MaxWorkers        int              `json:"max_workers"`
 	DefaultTimeoutSec int              `json:"default_timeout_sec"`
 	SpawnIntervalSec  int              `json:"spawn_interval_sec"`
+	WarmWorkers       int              `json:"warm_workers"`
 	LogRetentionDays  int              `json:"log_retention_days"`
 	SocketPath        string           `json:"socket_path"`
 	WorkspacePath     string           `json:"workspace_path"`
@@ -62,6 +63,7 @@ func Default() *Config {
 		MaxWorkers:        2,
 		DefaultTimeoutSec: 300,
 		SpawnIntervalSec:  5,
+		WarmWorkers:       1,
 		LogRetentionDays:  7,
 		SocketPath:        filepath.Join(GobrrDir(), "gobrrr.sock"),
 		WorkspacePath:     defaultWorkspacePath(),
