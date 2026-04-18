@@ -314,3 +314,11 @@ func (ww *WarmWorker) Disabled() bool {
 	defer ww.mu.Unlock()
 	return ww.disabled
 }
+
+// Status returns a snapshot of ready/busy/disabled under ww.mu.
+// Prefer this over reaching into the worker's fields from the pool.
+func (ww *WarmWorker) Status() (ready, busy, disabled bool) {
+	ww.mu.Lock()
+	defer ww.mu.Unlock()
+	return ww.ready, ww.busy, ww.disabled
+}

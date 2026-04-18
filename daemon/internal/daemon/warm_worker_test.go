@@ -272,3 +272,23 @@ done
 	require.NoError(t, os.WriteFile(script, []byte(content), 0755))
 	return script
 }
+
+func TestWarmWorkerStatusSnapshot(t *testing.T) {
+	ww := NewWarmWorker(0, "", nil, nil)
+
+	ready, busy, disabled := ww.Status()
+	assert.False(t, ready)
+	assert.False(t, busy)
+	assert.False(t, disabled)
+
+	ww.mu.Lock()
+	ww.ready = true
+	ww.busy = true
+	ww.disabled = true
+	ww.mu.Unlock()
+
+	ready, busy, disabled = ww.Status()
+	assert.True(t, ready)
+	assert.True(t, busy)
+	assert.True(t, disabled)
+}

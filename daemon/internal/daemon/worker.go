@@ -279,16 +279,15 @@ func (wp *WorkerPool) WarmStatus() (total, ready, busy, disabled int) {
 	wp.mu.Unlock()
 	for _, ww := range workers {
 		total++
-		ww.mu.Lock()
-		if ww.disabled {
+		r, b, d := ww.Status()
+		if d {
 			disabled++
-		} else if ww.ready {
+		} else if r {
 			ready++
 		}
-		if ww.busy {
+		if b {
 			busy++
 		}
-		ww.mu.Unlock()
 	}
 	return
 }
