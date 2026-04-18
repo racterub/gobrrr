@@ -19,6 +19,9 @@ MEMORY_CEILING_MB=$(cfg '.telegram_session.memory_ceiling_mb // 3072')
 MAX_UPTIME_HOURS=$(cfg '.telegram_session.max_uptime_hours // 6')
 MAX_RESTART_ATTEMPTS=$(cfg '.telegram_session.max_restart_attempts // 6')
 CHANNELS=$(cfg '[.telegram_session.channels // ["plugin:gobrrr-telegram@gobrrr-local","plugin:gobrrr-relay@gobrrr-local"] | .[] | "--dangerously-load-development-channels", .] | join(" ")')
+LAUNCHER_MODEL=$(cfg '.models.launcher.model // "haiku"')
+LAUNCHER_MODE=$(cfg '.models.launcher.permission_mode // "default"')
+LAUNCHER_SETTINGS="${GOBRRR_DIR}/launcher-settings.json"
 
 # Telegram notification config
 TELEGRAM_BOT_TOKEN=""
@@ -181,7 +184,7 @@ main() {
         /usr/bin/expect >> "$PTY_LOG" 2>&1 <<EXPECT_EOF
 set timeout -1
 log_user 1
-spawn -noecho $CLAUDE_BIN $CHANNELS
+spawn -noecho $CLAUDE_BIN --model $LAUNCHER_MODEL --permission-mode $LAUNCHER_MODE --settings $LAUNCHER_SETTINGS $CHANNELS
 expect {
     "confirm" { send "\\r"; exp_continue }
     eof

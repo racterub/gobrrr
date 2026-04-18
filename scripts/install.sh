@@ -6,7 +6,7 @@ set -euo pipefail
 # Requires: root (self-elevates)
 # Idempotent: safe to re-run for upgrades
 
-TOTAL_STEPS=21
+TOTAL_STEPS=22
 CURRENT_STEP=0
 
 trap 'echo ""; echo "FAILED at step [${CURRENT_STEP:-0}/${TOTAL_STEPS:-17}]"; echo "Check the output above for details."; exit 1' ERR
@@ -235,7 +235,36 @@ else
     echo "No legacy gobrrr MCP entry found, skipping"
 fi
 
-# --- Step 14: Install systemd unit ---
+# --- Step 14: Launcher settings ---
+step "Ensuring launcher permissions file"
+
+GOBRRR_DIR="/home/claude-agent/.gobrrr"
+LAUNCHER_SETTINGS="$GOBRRR_DIR/launcher-settings.json"
+
+if [ ! -f "$LAUNCHER_SETTINGS" ]; then
+    mkdir -p "$GOBRRR_DIR"
+    cat > "$LAUNCHER_SETTINGS" <<'JSON'
+{
+  "permissions": {
+    "allow": [
+      "Bash(gobrrr submit:*)",
+      "Bash(gobrrr status:*)",
+      "Bash(gobrrr list:*)",
+      "Bash(gobrrr logs:*)",
+      "mcp__plugin_gobrrr-telegram_telegram__*"
+    ],
+    "deny": ["Write", "Edit", "Bash(rm:*)", "Bash(git push:*)"]
+  }
+}
+JSON
+    chown -R claude-agent:claude-agent "$GOBRRR_DIR"
+    chmod 600 "$LAUNCHER_SETTINGS"
+    echo "Created $LAUNCHER_SETTINGS"
+else
+    echo "Launcher settings already exist at $LAUNCHER_SETTINGS"
+fi
+
+# --- Step 15: Install systemd unit ---
 step "Installing systemd service"
 
 cp "$REPO_DIR/daemon/systemd/gobrrr.service" /etc/systemd/system/gobrrr.service
@@ -246,7 +275,7 @@ systemctl enable gobrrr
 systemctl enable gobrrr-launcher
 echo "Services installed and enabled"
 
-# --- Step 15: Authenticate Claude Code ---
+# --- Step 16: Authenticate Claude Code ---
 step "Authenticating Claude Code"
 
 if sudo -u claude-agent -i claude -p "exit" --max-turns 1 &>/dev/null; then
@@ -258,7 +287,7 @@ else
     sudo -u claude-agent -i claude setup-token
 fi
 
-# --- Step 16: Install gobrrr-telegram channel plugin ---
+# --- Step 17: Install gobrrr-telegram channel plugin ---
 step "Installing gobrrr-telegram channel plugin"
 
 # Build the Go binary and stage it inside the plugin dir. The plugin's
@@ -321,7 +350,7 @@ else
     echo "Installed gobrrr-relay channel plugin"
 fi
 
-# --- Step 17: Configure Claude Code settings ---
+# --- Step 18: Configure Claude Code settings ---
 step "Configuring Claude Code settings"
 
 CLAUDE_SETTINGS="/home/claude-agent/.claude/settings.json"
@@ -401,7 +430,7 @@ mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
 chown claude-agent:claude-agent "$CLAUDE_SETTINGS"
 echo "Settings configured"
 
-# --- Step 18: Install default identity.md and CLAUDE.md ---
+# --- Step 19: Install default identity.md and CLAUDE.md ---
 step "Installing default identity.md and CLAUDE.md"
 
 install -d -o claude-agent -g claude-agent -m 0700 /home/claude-agent/.gobrrr
@@ -422,7 +451,7 @@ else
     echo "~/.claude/CLAUDE.md already exists, leaving it alone"
 fi
 
-# --- Step 19: Pre-trust workspace directory ---
+# --- Step 20: Pre-trust workspace directory ---
 step "Pre-trusting workspace for Claude Code"
 
 TRUST_DIR="/home/claude-agent/.claude/projects/-home-claude-agent-workspace"
@@ -430,12 +459,12 @@ mkdir -p "$TRUST_DIR"
 chown -R claude-agent:claude-agent /home/claude-agent/.claude/projects
 echo "Workspace /home/claude-agent/workspace trusted"
 
-# --- Step 20: Run gobrrr setup ---
+# --- Step 21: Run gobrrr setup ---
 step "Running gobrrr setup wizard"
 
 sudo -u claude-agent -i gobrrr setup
 
-# --- Step 21: Start service ---
+# --- Step 22: Start service ---
 step "Starting gobrrr service"
 
 if systemctl is-active --quiet gobrrr; then

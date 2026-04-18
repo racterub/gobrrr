@@ -86,7 +86,7 @@ Generated once by the install script or setup wizard, not per-session:
       "Bash(gobrrr status:*)",
       "Bash(gobrrr list:*)",
       "Bash(gobrrr logs:*)",
-      "mcp__plugin_telegram_telegram__*"
+      "mcp__plugin_gobrrr-telegram_telegram__*"
     ],
     "deny": ["Write", "Edit", "Bash(rm:*)", "Bash(git push:*)"]
   }

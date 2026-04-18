@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -17,19 +19,26 @@ import (
 	"github.com/racterub/gobrrr/internal/memory"
 )
 
+// respawnFlapWindow is the minimum gap between warm-worker respawns before
+// the slot is considered flapping and disabled. Prevents tight loops when
+// the classifier consistently aborts a misconfigured worker.
+const respawnFlapWindow = 60 * time.Second
+
 // WarmWorker manages a persistent Claude process for low-latency task dispatch.
 type WarmWorker struct {
-	mu       sync.Mutex
-	id       int
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	scanner  *bufio.Scanner
-	busy     bool
-	ready    bool
-	gobrrDir string
-	cfg      *config.Config
-	memStore *memory.Store
-	command  string // claude binary path, overridable for tests
+	mu          sync.Mutex
+	id          int
+	cmd         *exec.Cmd
+	stdin       io.WriteCloser
+	scanner     *bufio.Scanner
+	busy        bool
+	ready       bool
+	gobrrDir    string
+	cfg         *config.Config
+	memStore    *memory.Store
+	command     string // claude binary path, overridable for tests
+	lastRespawn time.Time
+	disabled    bool
 }
 
 // NewWarmWorker creates a WarmWorker. It is not started until Start() is called.
@@ -80,19 +89,44 @@ func (ww *WarmWorker) Start(ctx context.Context) error {
 		workDir = ww.cfg.WorkspacePath
 	}
 
+	settingsPath, model, mode, err := resolveWarmArgs(ww.gobrrDir, ww.cfg)
+	if err != nil {
+		return fmt.Errorf("warm worker %d: ensure warm settings: %w", ww.id, err)
+	}
+
 	var cmd *exec.Cmd
 	if ww.command != "claude" {
-		// Test mode: run the mock script directly.
-		cmd = exec.Command("bash", ww.command) //nolint:gosec
+		// Test mode: run mock script with the same flags so argv-capture tests work.
+		cmd = exec.Command("bash", ww.command, //nolint:gosec
+			"--model", model,
+			"--permission-mode", mode,
+			"--settings", settingsPath,
+		)
 	} else {
 		cmd = exec.Command("claude", "-p",
+			"--model", model,
+			"--permission-mode", mode,
+			"--settings", settingsPath,
 			"--input-format", "stream-json",
 			"--output-format", "stream-json",
-			"--dangerously-skip-permissions",
 			"--verbose",
 		)
 	}
 	cmd.Dir = workDir
+
+	logDir := filepath.Join(ww.gobrrDir, "logs")
+	if err := os.MkdirAll(logDir, 0700); err != nil {
+		log.Printf("warm worker %d: stderr log dir unavailable: %v", ww.id, err)
+	} else {
+		logPath := filepath.Join(logDir, fmt.Sprintf("warm-%d.log", ww.id))
+		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600); err != nil {
+			log.Printf("warm worker %d: stderr log open failed: %v", ww.id, err)
+		} else {
+			cmd.Stderr = logFile
+			// logFile stays open for the lifetime of the process. It is closed
+			// when the process exits via Go's process-cleanup reaper.
+		}
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -214,6 +248,26 @@ func (ww *WarmWorker) buildTaskPrompt(taskPrompt string) string {
 	return sb.String()
 }
 
+// resolveWarmArgs computes the settings file path, model, and permission
+// mode for a warm worker invocation. Defaults to sonnet/auto if cfg or
+// the relevant fields are unset.
+func resolveWarmArgs(gobrrDir string, cfg *config.Config) (settingsPath, model, mode string, err error) {
+	settingsPath, err = EnsureWarmSettings(gobrrDir)
+	if err != nil {
+		return "", "", "", err
+	}
+	model, mode = "sonnet", "auto"
+	if cfg != nil {
+		if m := cfg.Models.WarmWorker.Model; m != "" {
+			model = m
+		}
+		if pm := cfg.Models.WarmWorker.PermissionMode; pm != "" {
+			mode = pm
+		}
+	}
+	return settingsPath, model, mode, nil
+}
+
 // killLocked terminates the process. Caller must hold ww.mu.
 func (ww *WarmWorker) killLocked() {
 	ww.ready = false
@@ -236,4 +290,27 @@ func (ww *WarmWorker) killLocked() {
 	ww.cmd = nil
 	ww.stdin = nil
 	ww.scanner = nil
+}
+
+// RecordRespawnAttempt marks a respawn attempt. Returns true if the respawn
+// is allowed to proceed; false if the slot has flapped (two respawns within
+// respawnFlapWindow) and should be disabled instead. Callers MUST honor
+// the returned value.
+func (ww *WarmWorker) RecordRespawnAttempt() bool {
+	ww.mu.Lock()
+	defer ww.mu.Unlock()
+	now := time.Now()
+	if !ww.lastRespawn.IsZero() && now.Sub(ww.lastRespawn) < respawnFlapWindow {
+		ww.disabled = true
+		return false
+	}
+	ww.lastRespawn = now
+	return true
+}
+
+// Disabled reports whether anti-flap has disabled this slot.
+func (ww *WarmWorker) Disabled() bool {
+	ww.mu.Lock()
+	defer ww.mu.Unlock()
+	return ww.disabled
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -301,4 +302,70 @@ func TestWorkerPoolWarmFallbackToCold(t *testing.T) {
 	assert.Equal(t, "cold fallback\n", *completed.Result)
 
 	cancel()
+}
+
+func TestColdWorkerBuildCommandUsesConfiguredModelAndMode(t *testing.T) {
+	dir := t.TempDir()
+	q := NewQueue(filepath.Join(dir, "queue.json"))
+	cfg := &config.Config{
+		WorkspacePath: dir,
+		Models: config.ModelsConfig{
+			ColdWorker: config.ModelConfig{Model: "opus", PermissionMode: "auto"},
+		},
+	}
+	pool := NewWorkerPool(q, cfg, 1, 0, dir, nil)
+
+	task := &Task{ID: "t_test", Prompt: "hello", TimeoutSec: 10}
+	wc := pool.defaultBuildCommand(task)
+
+	// Expect --model opus --permission-mode auto somewhere in args.
+	joined := strings.Join(wc.Args, " ")
+	assert.Contains(t, joined, "--model opus")
+	assert.Contains(t, joined, "--permission-mode auto")
+	assert.NotContains(t, joined, "--dangerously-skip-permissions")
+}
+
+func TestReserveWarmWorkerSkipsDisabled(t *testing.T) {
+	dir := t.TempDir()
+	q := NewQueue(filepath.Join(dir, "queue.json"))
+	pool := NewWorkerPool(q, &config.Config{}, 1, 0, dir, nil)
+
+	// Manually populate a single warm worker, mark it disabled.
+	ww := NewWarmWorker(0, dir, nil, nil)
+	ww.ready = true
+	// Disable via two flap calls within the anti-flap window.
+	require.True(t, ww.RecordRespawnAttempt())
+	require.False(t, ww.RecordRespawnAttempt())
+	require.True(t, ww.Disabled())
+
+	pool.mu.Lock()
+	pool.warmWorkers = []*WarmWorker{ww}
+	pool.mu.Unlock()
+
+	got := pool.reserveWarmWorker()
+	assert.Nil(t, got, "disabled worker must not be reservable")
+}
+
+func TestWarmStatusExcludesDisabledFromReady(t *testing.T) {
+	dir := t.TempDir()
+	q := NewQueue(filepath.Join(dir, "queue.json"))
+	pool := NewWorkerPool(q, &config.Config{}, 1, 0, dir, nil)
+
+	ready := NewWarmWorker(0, dir, nil, nil)
+	ready.ready = true
+
+	disabled := NewWarmWorker(1, dir, nil, nil)
+	disabled.ready = true
+	require.True(t, disabled.RecordRespawnAttempt())
+	require.False(t, disabled.RecordRespawnAttempt())
+
+	pool.mu.Lock()
+	pool.warmWorkers = []*WarmWorker{ready, disabled}
+	pool.mu.Unlock()
+
+	total, readyCount, busy, disabledCount := pool.WarmStatus()
+	assert.Equal(t, 2, total, "total must include disabled workers")
+	assert.Equal(t, 1, readyCount, "ready must exclude disabled workers")
+	assert.Equal(t, 0, busy)
+	assert.Equal(t, 1, disabledCount, "disabled count must reflect the disabled slot")
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/racterub/gobrrr/internal/config"
 	"github.com/stretchr/testify/assert"
@@ -163,4 +164,111 @@ func TestWarmWorkerRunErrorResult(t *testing.T) {
 	_, err := ww.Run(task)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "something broke")
+}
+
+func TestWarmWorkerStartArgsIncludeModelAndMode(t *testing.T) {
+	dir := t.TempDir()
+	script := writeArgCaptureScript(t, dir)
+	writeMockIdentity(t, dir)
+
+	cfg := &config.Config{
+		WorkspacePath: dir,
+		Models: config.ModelsConfig{
+			WarmWorker: config.ModelConfig{Model: "sonnet", PermissionMode: "auto"},
+		},
+	}
+	ww := NewWarmWorker(0, dir, cfg, nil)
+	ww.command = script
+
+	ctx := t.Context()
+	require.NoError(t, ww.Start(ctx))
+	defer ww.Stop()
+
+	// The capture script writes its own argv to <workDir>/argv.log
+	args, err := os.ReadFile(filepath.Join(dir, "argv.log"))
+	require.NoError(t, err)
+	joined := string(args)
+	assert.Contains(t, joined, "--model sonnet")
+	assert.Contains(t, joined, "--permission-mode auto")
+	assert.Contains(t, joined, "--settings")
+	assert.NotContains(t, joined, "--dangerously-skip-permissions")
+}
+
+func TestWarmWorkerStderrRoutedToLogFile(t *testing.T) {
+	dir := t.TempDir()
+	script := writeStderrScript(t, dir)
+	writeMockIdentity(t, dir)
+
+	cfg := &config.Config{
+		WorkspacePath: dir,
+		Models: config.ModelsConfig{
+			WarmWorker: config.ModelConfig{Model: "sonnet", PermissionMode: "auto"},
+		},
+	}
+	ww := NewWarmWorker(7, dir, cfg, nil)
+	ww.command = script
+
+	ctx := t.Context()
+	require.NoError(t, ww.Start(ctx))
+	ww.Stop()
+
+	logPath := filepath.Join(dir, "logs", "warm-7.log")
+	data, err := os.ReadFile(logPath)
+	require.NoError(t, err, "expected stderr log at %s", logPath)
+	assert.Contains(t, string(data), "MARKER-STDERR")
+}
+
+// writeArgCaptureScript writes its own argv to <workDir>/argv.log, then
+// behaves like writeMockScript (init, then loop-respond).
+func writeArgCaptureScript(t *testing.T, dir string) string {
+	t.Helper()
+	script := filepath.Join(dir, "mock-claude-argv.sh")
+	content := `#!/bin/bash
+printf '%s ' "$@" > "` + dir + `/argv.log"
+echo '{"type":"system","subtype":"init","session_id":"mock-session"}'
+while IFS= read -r line; do
+  echo '{"type":"result","subtype":"success","result":"mock response","is_error":false,"duration_ms":10}'
+done
+`
+	require.NoError(t, os.WriteFile(script, []byte(content), 0755))
+	return script
+}
+
+func TestWarmWorkerRespawnAllowedAfterTimeWindow(t *testing.T) {
+	ww := NewWarmWorker(0, "", nil, nil)
+
+	// First respawn is always allowed.
+	assert.True(t, ww.RecordRespawnAttempt())
+	// Immediate second respawn is blocked (within window).
+	assert.False(t, ww.RecordRespawnAttempt())
+	// Manually advance the recorded time beyond the window, then try again.
+	ww.mu.Lock()
+	ww.lastRespawn = time.Now().Add(-2 * respawnFlapWindow)
+	ww.mu.Unlock()
+	assert.True(t, ww.RecordRespawnAttempt())
+}
+
+func TestWarmWorkerDisabledAfterFlap(t *testing.T) {
+	ww := NewWarmWorker(0, "", nil, nil)
+
+	assert.True(t, ww.RecordRespawnAttempt())
+	assert.False(t, ww.RecordRespawnAttempt())
+
+	assert.True(t, ww.Disabled())
+}
+
+// writeStderrScript emits a stderr marker line at startup then behaves like
+// writeMockScript. Used to verify stderr redirection.
+func writeStderrScript(t *testing.T, dir string) string {
+	t.Helper()
+	script := filepath.Join(dir, "mock-claude-stderr.sh")
+	content := `#!/bin/bash
+echo "MARKER-STDERR" >&2
+echo '{"type":"system","subtype":"init","session_id":"mock-session"}'
+while IFS= read -r line; do
+  echo '{"type":"result","subtype":"success","result":"mock response","is_error":false,"duration_ms":10}'
+done
+`
+	require.NoError(t, os.WriteFile(script, []byte(content), 0755))
+	return script
 }

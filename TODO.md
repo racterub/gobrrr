@@ -85,39 +85,6 @@ Warm worker `Run()` has no per-task timeout — if the Claude process hangs, `re
 
 - **Source code research needed for Claude Code permission architecture.** Dig through `claude-code/src` to find whether there is any supported way to have `--settings` *override* user settings while keeping OAuth, or to otherwise scope worker permissions without switching to API-key auth. If none exists, fall back to documenting the limitation and relying on the confirmation gate (`security/confirm.go`) as the real backstop, plus the workspace-CWD boundary from the CWD mismatch fix.
 
-## Teach Telegram session to dispatch via gobrrr warm/cold workers — 2026-04-13
-
-**What:** Update the Telegram session's instructions so the Claude instance acting as dispatcher knows how to use `gobrrr submit` to dispatch tasks, and understands when to route with `--warm` (simple/fast tasks like lookups, short answers, memory queries) vs cold spawn (complex/multi-step tasks requiring tool use, file editing, or isolation).
-
-**Why:** The warm worker pool (being designed now) is useless if the Telegram session doesn't know how to use it. Currently there are no dispatch instructions — the session needs prompting guidance to make good warm vs cold routing decisions.
-
-**Files / docs:**
-- `~/.claude/CLAUDE.md` on remote (claude-agent) — session-level instructions
-- `~/.gobrrr/identity.md` on remote — assistant identity, may need dispatch guidance
-- `docs/superpowers/specs/2026-04-13-warm-worker-pool-design.md` — warm pool spec (being written)
-- Existing gobrrr CLI: `daemon/cmd/gobrrr/main.go` — `submit` subcommand, `--warm` flag (to be added)
-
-**Constraints:**
-- Must be prompt/instruction changes only, no code changes
-- Warm pool must be implemented first — this TODO depends on the warm worker pool being functional
-- Instructions should be concrete with examples, not vague ("use --warm for simple tasks" isn't enough)
-- Should include fallback guidance: if warm worker is unavailable, fall back to cold
-
-**Acceptance criteria:**
-- [ ] Telegram session correctly routes simple tasks to `gobrrr submit --warm`
-- [ ] Telegram session correctly routes complex tasks to `gobrrr submit` (cold)
-- [ ] Session handles warm worker unavailability gracefully (falls back to cold)
-- [ ] Dispatch guidance documented in session instructions with concrete examples
-
-**Out of scope:**
-- Implementing the warm worker pool itself (separate task)
-- Auto-detection/heuristic routing (dispatcher decides explicitly)
-- Changing the gobrrr CLI interface beyond adding `--warm`
-
-**Estimated effort:** small — prompt/instruction writing, 1-2 files on the remote system
-
-**Start by:** Wait for warm worker pool to be implemented, then read the current `~/.claude/CLAUDE.md` and `~/.gobrrr/identity.md` on remote to understand existing session instructions before adding dispatch guidance
-
 ## Adopt ClaudeClaw plugin distribution model — 2026-04-12
 
 **What:** Package gobrrr as a Claude Code plugin installable via `claude plugin marketplace add racterub/gobrrr` with a `/gobrrr:start` setup wizard skill, replacing the current build-from-source + systemd manual setup. The Go daemon, parallel worker dispatch, security model (UNTRUSTED boundaries, per-task permission sandboxing, credential leak detection), and memory injection remain unchanged — this is a distribution and setup UX change, not a runtime architecture change.
@@ -156,4 +123,29 @@ Warm worker `Run()` has no per-task timeout — if the Claude process hangs, `re
 **Estimated effort:** large — requires understanding Claude Code plugin packaging format (undocumented/emerging), restructuring project layout for marketplace distribution, converting the setup wizard to a non-interactive skill, and solving cross-platform binary distribution within the plugin model. Multiple files across build, distribution, and setup code.
 
 **Start by:** Study ClaudeClaw's repo structure to understand how it packages itself as a Claude Code plugin — look at its `package.json`, plugin manifest, and how it registers skills like `/claudeclaw:start`. Then check Claude Code plugin marketplace docs for the packaging contract.
+
+## Launcher coordination follow-ups — 2026-04-18
+
+**What:** Three operational follow-ups surfaced by the final integration review of the launcher-worker-coordination branch (after Tasks 1–11 + the disabled-count fix landed):
+
+1. **Add `gobrrr-relay` MCP pattern to launcher allow-list** in `scripts/install.sh:249-255` (the `launcher-settings.json` heredoc), or document the deliberate exclusion. The launcher loads both `plugin:gobrrr-telegram@gobrrr-local` and `plugin:gobrrr-relay@gobrrr-local`; the worker-side allowlist (`install.sh:405`) already grants both, but the launcher allowlist only grants telegram. If the launcher ever needs to invoke relay-side tools, it'll get fail-closed denial.
+2. **Pre-flight check for `launcher-settings.json` in `scripts/launcher.sh:24`.** Currently the path is assigned unconditionally; if the file is missing (e.g., upgraded daemon binary without re-running install.sh), Claude fails to start with an opaque "settings file not found" and the systemd restart loop backs off up to 300s before giving up. A `[ -f "$LAUNCHER_SETTINGS" ] || { echo "..."; exit 1; }` would fail fast with a clear cause.
+3. **Decide `daemon/internal/session/manager.go:188` fate.** The Go in-daemon session manager (opt-in fallback when `telegram_session.enabled=true`) still uses `--dangerously-skip-permissions` and ignores `cfg.Models`. Three options: (a) wire it through the same role-based flags as `launcher.sh`, (b) remove it now that `launcher.sh` is the documented production path, (c) log a deprecation warning at startup when `telegram_session.enabled=true`.
+
+**Why:** Each is small but deferred during the main implementation to keep the spec-execution scope tight. Items 1 + 2 are operational hardening; item 3 is a consistency decision about a parallel code path.
+
+**Files / docs:**
+- `scripts/install.sh:249-255` (item 1)
+- `scripts/launcher.sh:24` (item 2)
+- `daemon/internal/session/manager.go:188` (item 3)
+- `docs/superpowers/specs/2026-04-18-launcher-worker-coordination-design.md` (background)
+
+**Acceptance criteria:**
+- [ ] Item 1: launcher allow-list includes `mcp__plugin_gobrrr-relay_gobrrr-relay__*` OR a comment documents why it's excluded
+- [ ] Item 2: launcher.sh exits non-zero with a clear message if `launcher-settings.json` is missing
+- [ ] Item 3: session/manager.go either uses role-based flags, is removed, or emits a deprecation warning
+
+**Estimated effort:** small — 3 separate small changes, ≤30 LOC total
+
+**Start by:** Item 1 first (1-line change). Then item 2 (5-line shell guard). Item 3 last because it requires a design call.
 

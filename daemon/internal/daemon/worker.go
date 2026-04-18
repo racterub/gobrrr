@@ -180,6 +180,15 @@ func (wp *WorkerPool) defaultBuildCommand(task *Task) *WorkerConfig {
 		"--output-format", "text",
 	}
 
+	if wp.cfg != nil {
+		if m := wp.cfg.Models.ColdWorker.Model; m != "" {
+			args = append(args, "--model", m)
+		}
+		if pm := wp.cfg.Models.ColdWorker.PermissionMode; pm != "" {
+			args = append(args, "--permission-mode", pm)
+		}
+	}
+
 	// Generate per-task settings.json for permission sandboxing.
 	workersDir := filepath.Join(wp.gobrrDir, "workers")
 	if settingsPath, err := security.Generate(workersDir, task.ID, task.AllowWrites); err == nil {
@@ -253,6 +262,9 @@ func (wp *WorkerPool) reserveWarmWorker() *WarmWorker {
 	workers := append([]*WarmWorker(nil), wp.warmWorkers...)
 	wp.mu.Unlock()
 	for _, ww := range workers {
+		if ww.Disabled() {
+			continue
+		}
 		if ww.Reserve() {
 			return ww
 		}
@@ -260,15 +272,17 @@ func (wp *WorkerPool) reserveWarmWorker() *WarmWorker {
 	return nil
 }
 
-// WarmStatus returns the total, ready, and busy counts for warm workers.
-func (wp *WorkerPool) WarmStatus() (total, ready, busy int) {
+// WarmStatus returns the total, ready, busy, and disabled counts for warm workers.
+func (wp *WorkerPool) WarmStatus() (total, ready, busy, disabled int) {
 	wp.mu.Lock()
 	workers := append([]*WarmWorker(nil), wp.warmWorkers...)
 	wp.mu.Unlock()
 	for _, ww := range workers {
 		total++
 		ww.mu.Lock()
-		if ww.ready {
+		if ww.disabled {
+			disabled++
+		} else if ww.ready {
 			ready++
 		}
 		if ww.busy {
@@ -345,8 +359,14 @@ func (wp *WorkerPool) dispatchWarm(ctx context.Context, ww *WarmWorker, task *Ta
 		if wp.onResult != nil && task.ReplyTo == "telegram" {
 			wp.onResult(task, "Task failed: "+msg)
 		}
-		// Respawn crashed warm worker if daemon is still running.
+		// Respawn crashed warm worker if daemon is still running, unless the slot
+		// has flapped (repeated aborts within the anti-flap window).
 		if ctx.Err() == nil {
+			if !ww.RecordRespawnAttempt() {
+				log.Printf("warm worker %d: flap detected, slot disabled until manual restart", ww.id)
+				ww.Stop()
+				return
+			}
 			log.Printf("warm worker %d: crash detected, respawning", ww.id)
 			ww.Stop()
 			if startErr := ww.Start(ctx); startErr != nil {

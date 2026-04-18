@@ -18,6 +18,11 @@ type settings struct {
 // Generate creates a per-task settings.json for Claude Code workers.
 // workersDir is the base directory (e.g. ~/.gobrrr/workers/), taskID is the task ID.
 // Returns the path to the generated settings.json.
+//
+// Rules produced here are deliberately narrow (e.g. Bash(gobrrr *) rather
+// than Bash(*)). Claude Code's --permission-mode auto drops broad wildcards
+// on startup as a defense-in-depth measure, so narrow rules are not just
+// good hygiene — they're required for the allow-list to take effect.
 func Generate(workersDir string, taskID string, allowWrites bool) (string, error) {
 	taskDir := filepath.Join(workersDir, taskID)
 	if err := os.MkdirAll(taskDir, 0700); err != nil {
