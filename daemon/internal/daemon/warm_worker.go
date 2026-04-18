@@ -97,13 +97,13 @@ func (ww *WarmWorker) Start(ctx context.Context) error {
 	var cmd *exec.Cmd
 	if ww.command != "claude" {
 		// Test mode: run mock script with the same flags so argv-capture tests work.
-		cmd = exec.Command("bash", ww.command, //nolint:gosec
+		cmd = exec.CommandContext(ctx, "bash", ww.command, //nolint:gosec
 			"--model", model,
 			"--permission-mode", mode,
 			"--settings", settingsPath,
 		)
 	} else {
-		cmd = exec.Command("claude", "-p",
+		cmd = exec.CommandContext(ctx, "claude", "-p",
 			"--model", model,
 			"--permission-mode", mode,
 			"--settings", settingsPath,

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -291,4 +292,42 @@ func TestWarmWorkerStatusSnapshot(t *testing.T) {
 	assert.True(t, ready)
 	assert.True(t, busy)
 	assert.True(t, disabled)
+}
+
+// writeHangScript creates a script that prints nothing and sleeps forever.
+// Used to simulate a claude process that never emits system/init.
+func writeHangScript(t *testing.T, dir string) string {
+	t.Helper()
+	script := filepath.Join(dir, "mock-claude-hang.sh")
+	content := `#!/bin/bash
+# Emit nothing; block on read so the process does not exit.
+exec sleep 3600
+`
+	require.NoError(t, os.WriteFile(script, []byte(content), 0755))
+	return script
+}
+
+func TestWarmWorkerStartCancelledDuringInit(t *testing.T) {
+	dir := t.TempDir()
+	script := writeHangScript(t, dir)
+	writeMockIdentity(t, dir)
+
+	ww := NewWarmWorker(0, dir, &config.Config{WorkspacePath: dir}, nil)
+	ww.command = script
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- ww.Start(ctx) }()
+
+	// Give Start time to launch the subprocess and block on init read.
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err, "Start must return an error when ctx is cancelled mid-init")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start did not return after context cancellation — subprocess likely orphaned")
+	}
 }
