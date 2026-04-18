@@ -35,6 +35,13 @@ func TestEnsureWarmSettingsCreatesFile(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, deny, "Write")
 	assert.Contains(t, deny, "Edit")
+
+	plugins, ok := parsed["enabledPlugins"].(map[string]any)
+	require.True(t, ok, "expected enabledPlugins object")
+	assert.Equal(t, false, plugins["gobrrr-telegram@gobrrr-local"],
+		"telegram plugin must be disabled so warm workers don't race the launcher on getUpdates")
+	assert.Equal(t, false, plugins["gobrrr-relay@gobrrr-local"],
+		"relay plugin must be disabled; it's for the launcher session, not warm workers")
 }
 
 func TestEnsureWarmSettingsIsIdempotent(t *testing.T) {
