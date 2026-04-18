@@ -69,3 +69,60 @@ func TestReadUntilResultEOF(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no result message")
 }
+
+func TestReadUntilInitFailsAfterMalformedBurst(t *testing.T) {
+	var sb strings.Builder
+	// 101 malformed lines, then an init — exceeds the budget.
+	for i := 0; i < 101; i++ {
+		sb.WriteString("not json\n")
+	}
+	sb.WriteString(`{"type":"system","subtype":"init","session_id":"late"}` + "\n")
+
+	scanner := bufio.NewScanner(strings.NewReader(sb.String()))
+	err := readUntilInit(scanner)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "malformed")
+}
+
+func TestReadUntilInitToleratesSmallBurst(t *testing.T) {
+	// A handful of malformed lines followed by init — under budget.
+	input := "garbage\nmore garbage\n" +
+		`{"type":"system","subtype":"init","session_id":"ok"}` + "\n"
+
+	scanner := bufio.NewScanner(strings.NewReader(input))
+	err := readUntilInit(scanner)
+	require.NoError(t, err)
+}
+
+func TestReadUntilResultFailsAfterMalformedBurst(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 101; i++ {
+		sb.WriteString("not json\n")
+	}
+	sb.WriteString(`{"type":"result","subtype":"success","result":"late","is_error":false,"duration_ms":1}` + "\n")
+
+	scanner := bufio.NewScanner(strings.NewReader(sb.String()))
+	_, err := readUntilResult(scanner)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "malformed")
+}
+
+func TestReadUntilResultResetsCounterOnValidLine(t *testing.T) {
+	// Interleave malformed and valid-but-not-result lines; counter should
+	// reset on each successful parse so a long stream survives.
+	var sb strings.Builder
+	for i := 0; i < 60; i++ {
+		sb.WriteString("garbage\n")
+	}
+	// A valid (non-result) line resets the counter.
+	sb.WriteString(`{"type":"assistant","message":{"role":"assistant","content":[]}}` + "\n")
+	for i := 0; i < 60; i++ {
+		sb.WriteString("garbage\n")
+	}
+	sb.WriteString(`{"type":"result","subtype":"success","result":"ok","is_error":false,"duration_ms":1}` + "\n")
+
+	scanner := bufio.NewScanner(strings.NewReader(sb.String()))
+	result, err := readUntilResult(scanner)
+	require.NoError(t, err)
+	assert.Equal(t, "ok", result.Result)
+}

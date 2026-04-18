@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 )
 
 // streamMsg is used for initial type dispatch when reading NDJSON lines.
@@ -53,14 +54,30 @@ func writeUserMessage(w io.Writer, content string) error {
 	return err
 }
 
+// maxConsecutiveParseFailures caps silent NDJSON parse failures. Past this,
+// the reader gives up and returns an error instead of spinning forever on
+// a malformed stream (e.g., wrong binary on PATH, upgrade produced garbage).
+const maxConsecutiveParseFailures = 100
+
 // readUntilInit reads NDJSON lines from scanner until a system/init message.
-// Non-init lines are silently skipped.
+// Non-init lines that parse cleanly are skipped. Lines that fail to parse
+// are logged and counted — the reader fails fast once maxConsecutiveParseFailures
+// is exceeded without an intervening valid line.
 func readUntilInit(scanner *bufio.Scanner) error {
+	consecutiveFailures := 0
 	for scanner.Scan() {
 		var msg streamMsg
 		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			consecutiveFailures++
+			if consecutiveFailures == 1 {
+				log.Printf("warm proto: malformed NDJSON line (init): %s", truncateLine(scanner.Bytes()))
+			}
+			if consecutiveFailures > maxConsecutiveParseFailures {
+				return fmt.Errorf("reading stdout: exceeded %d consecutive malformed lines before init", maxConsecutiveParseFailures)
+			}
 			continue
 		}
+		consecutiveFailures = 0
 		if msg.Type == "system" && msg.Subtype == "init" {
 			return nil
 		}
@@ -72,13 +89,24 @@ func readUntilInit(scanner *bufio.Scanner) error {
 }
 
 // readUntilResult reads NDJSON lines from scanner until a result message.
-// All non-result lines (assistant, system, stream_event) are skipped.
+// All non-result lines that parse cleanly are skipped. Malformed lines are
+// logged and counted — the reader fails fast once maxConsecutiveParseFailures
+// is exceeded without an intervening valid line.
 func readUntilResult(scanner *bufio.Scanner) (*resultMsg, error) {
+	consecutiveFailures := 0
 	for scanner.Scan() {
 		var msg streamMsg
 		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			consecutiveFailures++
+			if consecutiveFailures == 1 {
+				log.Printf("warm proto: malformed NDJSON line (result): %s", truncateLine(scanner.Bytes()))
+			}
+			if consecutiveFailures > maxConsecutiveParseFailures {
+				return nil, fmt.Errorf("reading stdout: exceeded %d consecutive malformed lines before result", maxConsecutiveParseFailures)
+			}
 			continue
 		}
+		consecutiveFailures = 0
 		if msg.Type == "result" {
 			var result resultMsg
 			if err := json.Unmarshal(scanner.Bytes(), &result); err != nil {
@@ -91,4 +119,14 @@ func readUntilResult(scanner *bufio.Scanner) (*resultMsg, error) {
 		return nil, fmt.Errorf("reading stdout: %w", err)
 	}
 	return nil, fmt.Errorf("unexpected EOF: no result message received")
+}
+
+// truncateLine returns up to 120 bytes of line for logging; callers shouldn't
+// dump 10MB of garbage into logs when a stream goes bad.
+func truncateLine(b []byte) string {
+	const max = 120
+	if len(b) <= max {
+		return string(b)
+	}
+	return string(b[:max]) + "..."
 }
