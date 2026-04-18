@@ -306,11 +306,12 @@ type warmStatus struct {
 
 // healthResponse is the JSON body returned by GET /health.
 type healthResponse struct {
-	Status        string     `json:"status"`
-	UptimeSec     int64      `json:"uptime_sec"`
-	WorkersActive int        `json:"workers_active"`
-	QueueDepth    int        `json:"queue_depth"`
-	WarmWorkers   warmStatus `json:"warm_workers"`
+	Status        string              `json:"status"`
+	UptimeSec     int64               `json:"uptime_sec"`
+	WorkersActive int                 `json:"workers_active"`
+	QueueDepth    int                 `json:"queue_depth"`
+	WarmWorkers   warmStatus          `json:"warm_workers"`
+	Models        config.ModelsConfig `json:"models"`
 }
 
 func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -322,6 +323,7 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 		WorkersActive: d.workerPool.Active(),
 		QueueDepth:    len(activeTasks),
 		WarmWorkers:   warmStatus{Total: total, Ready: ready, Busy: busy},
+		Models:        d.cfg.Models,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

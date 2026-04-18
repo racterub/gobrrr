@@ -88,6 +88,14 @@ var daemonStatusCmd = &cobra.Command{
 		fmt.Printf("Uptime (sec):    %v\n", info["uptime_sec"])
 		fmt.Printf("Workers active:  %v\n", info["workers_active"])
 		fmt.Printf("Queue depth:     %v\n", info["queue_depth"])
+		if models, ok := info["models"].(map[string]any); ok {
+			fmt.Println("Models:")
+			for _, role := range []string{"launcher", "warm_worker", "cold_worker"} {
+				if m, ok := models[role].(map[string]any); ok {
+					fmt.Printf("  %-12s %v (%v)\n", role, m["model"], m["permission_mode"])
+				}
+			}
+		}
 		return nil
 	},
 }
