@@ -122,6 +122,7 @@ output/              Safe directory for file: reply-to
 
 ## Specs and Plans
 
-- Design spec: `docs/specs/2026-03-23-gobrrr-design.md`
-- Implementation plan: `docs/plans/2026-03-24-gobrrr-implementation.md`
+- Design spec: `docs/superpowers/specs/2026-03-23-gobrrr-design.md`
+- Implementation plan: `docs/superpowers/plans/2026-03-24-gobrrr-implementation.md`
+- All specs and plans: `docs/superpowers/{specs,plans}/`
 - Future work: `TODO.md` (warm worker pool)
