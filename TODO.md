@@ -85,39 +85,6 @@ Warm worker `Run()` has no per-task timeout — if the Claude process hangs, `re
 
 - **Source code research needed for Claude Code permission architecture.** Dig through `claude-code/src` to find whether there is any supported way to have `--settings` *override* user settings while keeping OAuth, or to otherwise scope worker permissions without switching to API-key auth. If none exists, fall back to documenting the limitation and relying on the confirmation gate (`security/confirm.go`) as the real backstop, plus the workspace-CWD boundary from the CWD mismatch fix.
 
-## Teach Telegram session to dispatch via gobrrr warm/cold workers — 2026-04-13
-
-**What:** Update the Telegram session's instructions so the Claude instance acting as dispatcher knows how to use `gobrrr submit` to dispatch tasks, and understands when to route with `--warm` (simple/fast tasks like lookups, short answers, memory queries) vs cold spawn (complex/multi-step tasks requiring tool use, file editing, or isolation).
-
-**Why:** The warm worker pool (being designed now) is useless if the Telegram session doesn't know how to use it. Currently there are no dispatch instructions — the session needs prompting guidance to make good warm vs cold routing decisions.
-
-**Files / docs:**
-- `~/.claude/CLAUDE.md` on remote (claude-agent) — session-level instructions
-- `~/.gobrrr/identity.md` on remote — assistant identity, may need dispatch guidance
-- `docs/superpowers/specs/2026-04-13-warm-worker-pool-design.md` — warm pool spec (being written)
-- Existing gobrrr CLI: `daemon/cmd/gobrrr/main.go` — `submit` subcommand, `--warm` flag (to be added)
-
-**Constraints:**
-- Must be prompt/instruction changes only, no code changes
-- Warm pool must be implemented first — this TODO depends on the warm worker pool being functional
-- Instructions should be concrete with examples, not vague ("use --warm for simple tasks" isn't enough)
-- Should include fallback guidance: if warm worker is unavailable, fall back to cold
-
-**Acceptance criteria:**
-- [ ] Telegram session correctly routes simple tasks to `gobrrr submit --warm`
-- [ ] Telegram session correctly routes complex tasks to `gobrrr submit` (cold)
-- [ ] Session handles warm worker unavailability gracefully (falls back to cold)
-- [ ] Dispatch guidance documented in session instructions with concrete examples
-
-**Out of scope:**
-- Implementing the warm worker pool itself (separate task)
-- Auto-detection/heuristic routing (dispatcher decides explicitly)
-- Changing the gobrrr CLI interface beyond adding `--warm`
-
-**Estimated effort:** small — prompt/instruction writing, 1-2 files on the remote system
-
-**Start by:** Wait for warm worker pool to be implemented, then read the current `~/.claude/CLAUDE.md` and `~/.gobrrr/identity.md` on remote to understand existing session instructions before adding dispatch guidance
-
 ## Adopt ClaudeClaw plugin distribution model — 2026-04-12
 
 **What:** Package gobrrr as a Claude Code plugin installable via `claude plugin marketplace add racterub/gobrrr` with a `/gobrrr:start` setup wizard skill, replacing the current build-from-source + systemd manual setup. The Go daemon, parallel worker dispatch, security model (UNTRUSTED boundaries, per-task permission sandboxing, credential leak detection), and memory injection remain unchanged — this is a distribution and setup UX change, not a runtime architecture change.
