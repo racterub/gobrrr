@@ -23,6 +23,12 @@ LAUNCHER_MODEL=$(cfg '.models.launcher.model // "haiku"')
 LAUNCHER_MODE=$(cfg '.models.launcher.permission_mode // "default"')
 LAUNCHER_SETTINGS="${GOBRRR_DIR}/launcher-settings.json"
 
+if [ ! -f "$LAUNCHER_SETTINGS" ]; then
+    echo "[$(date)] ERROR: launcher settings file not found: $LAUNCHER_SETTINGS" >&2
+    echo "[$(date)] Run scripts/install.sh to regenerate it." >&2
+    exit 1
+fi
+
 # Telegram notification config
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_CHAT_ID=""

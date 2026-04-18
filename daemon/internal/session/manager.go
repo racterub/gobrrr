@@ -144,6 +144,11 @@ func (m *Manager) Run(ctx context.Context) {
 		return
 	}
 
+	log.Println("session: WARNING: in-daemon telegram_session is deprecated; " +
+		"prefer the gobrrr-launcher systemd unit (scripts/launcher.sh). " +
+		"This code path uses --dangerously-skip-permissions and ignores models.launcher. " +
+		"Set telegram_session.enabled=false in config.json to silence.")
+
 	for {
 		if m.restarts >= m.config.MaxRestartAttempts {
 			msg := fmt.Sprintf("session: gave up after %d consecutive failures", m.restarts)

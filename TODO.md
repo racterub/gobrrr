@@ -124,28 +124,3 @@ Warm worker `Run()` has no per-task timeout — if the Claude process hangs, `re
 
 **Start by:** Study ClaudeClaw's repo structure to understand how it packages itself as a Claude Code plugin — look at its `package.json`, plugin manifest, and how it registers skills like `/claudeclaw:start`. Then check Claude Code plugin marketplace docs for the packaging contract.
 
-## Launcher coordination follow-ups — 2026-04-18
-
-**What:** Three operational follow-ups surfaced by the final integration review of the launcher-worker-coordination branch (after Tasks 1–11 + the disabled-count fix landed):
-
-1. **Add `gobrrr-relay` MCP pattern to launcher allow-list** in `scripts/install.sh:249-255` (the `launcher-settings.json` heredoc), or document the deliberate exclusion. The launcher loads both `plugin:gobrrr-telegram@gobrrr-local` and `plugin:gobrrr-relay@gobrrr-local`; the worker-side allowlist (`install.sh:405`) already grants both, but the launcher allowlist only grants telegram. If the launcher ever needs to invoke relay-side tools, it'll get fail-closed denial.
-2. **Pre-flight check for `launcher-settings.json` in `scripts/launcher.sh:24`.** Currently the path is assigned unconditionally; if the file is missing (e.g., upgraded daemon binary without re-running install.sh), Claude fails to start with an opaque "settings file not found" and the systemd restart loop backs off up to 300s before giving up. A `[ -f "$LAUNCHER_SETTINGS" ] || { echo "..."; exit 1; }` would fail fast with a clear cause.
-3. **Decide `daemon/internal/session/manager.go:188` fate.** The Go in-daemon session manager (opt-in fallback when `telegram_session.enabled=true`) still uses `--dangerously-skip-permissions` and ignores `cfg.Models`. Three options: (a) wire it through the same role-based flags as `launcher.sh`, (b) remove it now that `launcher.sh` is the documented production path, (c) log a deprecation warning at startup when `telegram_session.enabled=true`.
-
-**Why:** Each is small but deferred during the main implementation to keep the spec-execution scope tight. Items 1 + 2 are operational hardening; item 3 is a consistency decision about a parallel code path.
-
-**Files / docs:**
-- `scripts/install.sh:249-255` (item 1)
-- `scripts/launcher.sh:24` (item 2)
-- `daemon/internal/session/manager.go:188` (item 3)
-- `docs/superpowers/specs/2026-04-18-launcher-worker-coordination-design.md` (background)
-
-**Acceptance criteria:**
-- [ ] Item 1: launcher allow-list includes `mcp__plugin_gobrrr-relay_gobrrr-relay__*` OR a comment documents why it's excluded
-- [ ] Item 2: launcher.sh exits non-zero with a clear message if `launcher-settings.json` is missing
-- [ ] Item 3: session/manager.go either uses role-based flags, is removed, or emits a deprecation warning
-
-**Estimated effort:** small — 3 separate small changes, ≤30 LOC total
-
-**Start by:** Item 1 first (1-line change). Then item 2 (5-line shell guard). Item 3 last because it requires a design call.
-
