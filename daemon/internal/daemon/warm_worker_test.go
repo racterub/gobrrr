@@ -331,3 +331,48 @@ func TestWarmWorkerStartCancelledDuringInit(t *testing.T) {
 		t.Fatal("Start did not return after context cancellation — subprocess likely orphaned")
 	}
 }
+
+// writeSlowScript handles init + identity-ack normally, then never
+// emits a result for the first real task. Used to verify Run timeout.
+func writeSlowScript(t *testing.T, dir string) string {
+	t.Helper()
+	script := filepath.Join(dir, "mock-claude-slow.sh")
+	content := `#!/bin/bash
+echo '{"type":"system","subtype":"init","session_id":"slow-session"}'
+# identity message + ack
+read -r line
+echo '{"type":"result","subtype":"success","result":"ready","is_error":false,"duration_ms":1}'
+# first real task: read but never respond
+read -r line
+exec sleep 3600
+`
+	require.NoError(t, os.WriteFile(script, []byte(content), 0755))
+	return script
+}
+
+func TestWarmWorkerRunTimeout(t *testing.T) {
+	dir := t.TempDir()
+	script := writeSlowScript(t, dir)
+	writeMockIdentity(t, dir)
+
+	ww := NewWarmWorker(0, dir, &config.Config{WorkspacePath: dir}, nil)
+	ww.command = script
+
+	ctx := t.Context()
+	require.NoError(t, ww.Start(ctx))
+
+	task := &Task{ID: "t_timeout", Prompt: "hang please", TimeoutSec: 1}
+	start := time.Now()
+	_, err := ww.Run(task)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrWarmTimeout, "Run should return ErrWarmTimeout")
+	assert.Less(t, elapsed, 5*time.Second, "Run must honor TimeoutSec and not block indefinitely")
+
+	// After timeout the worker is killed — a follow-up Run should fail fast
+	// because stdin/scanner were cleared by Stop.
+	_, err = ww.Run(task)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not ready")
+}

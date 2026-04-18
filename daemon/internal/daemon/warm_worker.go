@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -23,6 +24,10 @@ import (
 // the slot is considered flapping and disabled. Prevents tight loops when
 // the classifier consistently aborts a misconfigured worker.
 const respawnFlapWindow = 60 * time.Second
+
+// ErrWarmTimeout is returned by Run when the task exceeds TimeoutSec.
+// The worker is killed and must be respawned by the caller.
+var ErrWarmTimeout = errors.New("warm worker: timeout")
 
 // WarmWorker manages a persistent Claude process for low-latency task dispatch.
 type WarmWorker struct {
@@ -195,6 +200,10 @@ func (ww *WarmWorker) Stop() {
 // Run sends a task prompt to the warm worker and returns the result.
 // The caller must Reserve() before calling Run() and Release() after.
 // Run does not manage the busy flag.
+//
+// On timeout (task.TimeoutSec), the worker process is killed and
+// ErrWarmTimeout is returned. Callers (dispatchWarm) treat this the
+// same as a crash and respawn the slot subject to the anti-flap guard.
 func (ww *WarmWorker) Run(task *Task) (string, error) {
 	ww.mu.Lock()
 	stdin, scanner := ww.stdin, ww.scanner
@@ -210,16 +219,39 @@ func (ww *WarmWorker) Run(task *Task) (string, error) {
 		return "", fmt.Errorf("warm worker %d: write: %w", ww.id, err)
 	}
 
-	result, err := readUntilResult(scanner)
-	if err != nil {
-		return "", fmt.Errorf("warm worker %d: read: %w", ww.id, err)
+	type readResult struct {
+		result *resultMsg
+		err    error
 	}
+	readCh := make(chan readResult, 1)
+	go func() {
+		r, err := readUntilResult(scanner)
+		readCh <- readResult{result: r, err: err}
+	}()
 
-	if result.IsError {
-		return "", fmt.Errorf("warm worker %d: %s", ww.id, strings.Join(result.Errors, "; "))
+	timeout := time.Duration(task.TimeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = time.Hour // sane upper bound when TimeoutSec is unset
 	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 
-	return result.Result, nil
+	select {
+	case <-timer.C:
+		// Kill the subprocess; readUntilResult will see EOF and exit.
+		ww.Stop()
+		<-readCh
+		return "", fmt.Errorf("warm worker %d: %w", ww.id, ErrWarmTimeout)
+
+	case rr := <-readCh:
+		if rr.err != nil {
+			return "", fmt.Errorf("warm worker %d: read: %w", ww.id, rr.err)
+		}
+		if rr.result.IsError {
+			return "", fmt.Errorf("warm worker %d: %s", ww.id, strings.Join(rr.result.Errors, "; "))
+		}
+		return rr.result.Result, nil
+	}
 }
 
 // buildTaskPrompt builds the per-task prompt with relevant memories (no identity).
