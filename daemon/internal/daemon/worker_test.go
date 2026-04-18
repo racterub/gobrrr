@@ -324,3 +324,47 @@ func TestColdWorkerBuildCommandUsesConfiguredModelAndMode(t *testing.T) {
 	assert.Contains(t, joined, "--permission-mode auto")
 	assert.NotContains(t, joined, "--dangerously-skip-permissions")
 }
+
+func TestReserveWarmWorkerSkipsDisabled(t *testing.T) {
+	dir := t.TempDir()
+	q := NewQueue(filepath.Join(dir, "queue.json"))
+	pool := NewWorkerPool(q, &config.Config{}, 1, 0, dir, nil)
+
+	// Manually populate a single warm worker, mark it disabled.
+	ww := NewWarmWorker(0, dir, nil, nil)
+	ww.ready = true
+	// Disable via two flap calls within the anti-flap window.
+	require.True(t, ww.RecordRespawnAttempt())
+	require.False(t, ww.RecordRespawnAttempt())
+	require.True(t, ww.Disabled())
+
+	pool.mu.Lock()
+	pool.warmWorkers = []*WarmWorker{ww}
+	pool.mu.Unlock()
+
+	got := pool.reserveWarmWorker()
+	assert.Nil(t, got, "disabled worker must not be reservable")
+}
+
+func TestWarmStatusExcludesDisabledFromReady(t *testing.T) {
+	dir := t.TempDir()
+	q := NewQueue(filepath.Join(dir, "queue.json"))
+	pool := NewWorkerPool(q, &config.Config{}, 1, 0, dir, nil)
+
+	ready := NewWarmWorker(0, dir, nil, nil)
+	ready.ready = true
+
+	disabled := NewWarmWorker(1, dir, nil, nil)
+	disabled.ready = true
+	require.True(t, disabled.RecordRespawnAttempt())
+	require.False(t, disabled.RecordRespawnAttempt())
+
+	pool.mu.Lock()
+	pool.warmWorkers = []*WarmWorker{ready, disabled}
+	pool.mu.Unlock()
+
+	total, readyCount, busy := pool.WarmStatus()
+	assert.Equal(t, 2, total, "total must include disabled workers")
+	assert.Equal(t, 1, readyCount, "ready must exclude disabled workers")
+	assert.Equal(t, 0, busy)
+}
