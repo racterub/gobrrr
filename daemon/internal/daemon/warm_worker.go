@@ -82,44 +82,20 @@ func (ww *WarmWorker) Start(ctx context.Context) error {
 		workDir = ww.cfg.WorkspacePath
 	}
 
+	settingsPath, model, mode, err := resolveWarmArgs(ww.gobrrDir, ww.cfg)
+	if err != nil {
+		return fmt.Errorf("warm worker %d: ensure warm settings: %w", ww.id, err)
+	}
+
 	var cmd *exec.Cmd
 	if ww.command != "claude" {
-		// Test mode: run the mock script and pass through the same flags that
-		// the real invocation would use, so tests can assert on argv.
-		settingsPath, err := EnsureWarmSettings(ww.gobrrDir)
-		if err != nil {
-			return fmt.Errorf("warm worker %d: ensure warm settings: %w", ww.id, err)
-		}
-		model := "sonnet"
-		mode := "auto"
-		if ww.cfg != nil {
-			if m := ww.cfg.Models.WarmWorker.Model; m != "" {
-				model = m
-			}
-			if pm := ww.cfg.Models.WarmWorker.PermissionMode; pm != "" {
-				mode = pm
-			}
-		}
+		// Test mode: run mock script with the same flags so argv-capture tests work.
 		cmd = exec.Command("bash", ww.command, //nolint:gosec
 			"--model", model,
 			"--permission-mode", mode,
 			"--settings", settingsPath,
 		)
 	} else {
-		settingsPath, err := EnsureWarmSettings(ww.gobrrDir)
-		if err != nil {
-			return fmt.Errorf("warm worker %d: ensure warm settings: %w", ww.id, err)
-		}
-		model := "sonnet"
-		mode := "auto"
-		if ww.cfg != nil {
-			if m := ww.cfg.Models.WarmWorker.Model; m != "" {
-				model = m
-			}
-			if pm := ww.cfg.Models.WarmWorker.PermissionMode; pm != "" {
-				mode = pm
-			}
-		}
 		cmd = exec.Command("claude", "-p",
 			"--model", model,
 			"--permission-mode", mode,
@@ -132,9 +108,13 @@ func (ww *WarmWorker) Start(ctx context.Context) error {
 	cmd.Dir = workDir
 
 	logDir := filepath.Join(ww.gobrrDir, "logs")
-	if err := os.MkdirAll(logDir, 0700); err == nil {
+	if err := os.MkdirAll(logDir, 0700); err != nil {
+		log.Printf("warm worker %d: stderr log dir unavailable: %v", ww.id, err)
+	} else {
 		logPath := filepath.Join(logDir, fmt.Sprintf("warm-%d.log", ww.id))
-		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600); err == nil {
+		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600); err != nil {
+			log.Printf("warm worker %d: stderr log open failed: %v", ww.id, err)
+		} else {
 			cmd.Stderr = logFile
 			// logFile stays open for the lifetime of the process. It is closed
 			// when the process exits via Go's process-cleanup reaper.
@@ -259,6 +239,26 @@ func (ww *WarmWorker) buildTaskPrompt(taskPrompt string) string {
 	sb.WriteString("\n</task>")
 
 	return sb.String()
+}
+
+// resolveWarmArgs computes the settings file path, model, and permission
+// mode for a warm worker invocation. Defaults to sonnet/auto if cfg or
+// the relevant fields are unset.
+func resolveWarmArgs(gobrrDir string, cfg *config.Config) (settingsPath, model, mode string, err error) {
+	settingsPath, err = EnsureWarmSettings(gobrrDir)
+	if err != nil {
+		return "", "", "", err
+	}
+	model, mode = "sonnet", "auto"
+	if cfg != nil {
+		if m := cfg.Models.WarmWorker.Model; m != "" {
+			model = m
+		}
+		if pm := cfg.Models.WarmWorker.PermissionMode; pm != "" {
+			mode = pm
+		}
+	}
+	return settingsPath, model, mode, nil
 }
 
 // killLocked terminates the process. Caller must hold ww.mu.
