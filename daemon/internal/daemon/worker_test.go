@@ -363,8 +363,9 @@ func TestWarmStatusExcludesDisabledFromReady(t *testing.T) {
 	pool.warmWorkers = []*WarmWorker{ready, disabled}
 	pool.mu.Unlock()
 
-	total, readyCount, busy := pool.WarmStatus()
+	total, readyCount, busy, disabledCount := pool.WarmStatus()
 	assert.Equal(t, 2, total, "total must include disabled workers")
 	assert.Equal(t, 1, readyCount, "ready must exclude disabled workers")
 	assert.Equal(t, 0, busy)
+	assert.Equal(t, 1, disabledCount, "disabled count must reflect the disabled slot")
 }

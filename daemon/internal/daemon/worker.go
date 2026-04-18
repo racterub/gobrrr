@@ -272,15 +272,17 @@ func (wp *WorkerPool) reserveWarmWorker() *WarmWorker {
 	return nil
 }
 
-// WarmStatus returns the total, ready, and busy counts for warm workers.
-func (wp *WorkerPool) WarmStatus() (total, ready, busy int) {
+// WarmStatus returns the total, ready, busy, and disabled counts for warm workers.
+func (wp *WorkerPool) WarmStatus() (total, ready, busy, disabled int) {
 	wp.mu.Lock()
 	workers := append([]*WarmWorker(nil), wp.warmWorkers...)
 	wp.mu.Unlock()
 	for _, ww := range workers {
 		total++
 		ww.mu.Lock()
-		if ww.ready && !ww.disabled {
+		if ww.disabled {
+			disabled++
+		} else if ww.ready {
 			ready++
 		}
 		if ww.busy {

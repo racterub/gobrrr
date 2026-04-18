@@ -299,9 +299,10 @@ func (d *Daemon) updateHeartbeat() {
 
 // warmStatus describes the warm worker pool's capacity and current utilization.
 type warmStatus struct {
-	Total int `json:"total"`
-	Ready int `json:"ready"`
-	Busy  int `json:"busy"`
+	Total    int `json:"total"`
+	Ready    int `json:"ready"`
+	Busy     int `json:"busy"`
+	Disabled int `json:"disabled"`
 }
 
 // healthResponse is the JSON body returned by GET /health.
@@ -316,13 +317,13 @@ type healthResponse struct {
 
 func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 	activeTasks := d.queue.List(false)
-	total, ready, busy := d.workerPool.WarmStatus()
+	total, ready, busy, disabled := d.workerPool.WarmStatus()
 	resp := healthResponse{
 		Status:        "ok",
 		UptimeSec:     int64(time.Since(d.startTime).Seconds()),
 		WorkersActive: d.workerPool.Active(),
 		QueueDepth:    len(activeTasks),
-		WarmWorkers:   warmStatus{Total: total, Ready: ready, Busy: busy},
+		WarmWorkers:   warmStatus{Total: total, Ready: ready, Busy: busy, Disabled: disabled},
 		Models:        d.cfg.Models,
 	}
 	w.Header().Set("Content-Type", "application/json")
