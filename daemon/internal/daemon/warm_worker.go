@@ -19,19 +19,26 @@ import (
 	"github.com/racterub/gobrrr/internal/memory"
 )
 
+// respawnFlapWindow is the minimum gap between warm-worker respawns before
+// the slot is considered flapping and disabled. Prevents tight loops when
+// the classifier consistently aborts a misconfigured worker.
+const respawnFlapWindow = 60 * time.Second
+
 // WarmWorker manages a persistent Claude process for low-latency task dispatch.
 type WarmWorker struct {
-	mu       sync.Mutex
-	id       int
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	scanner  *bufio.Scanner
-	busy     bool
-	ready    bool
-	gobrrDir string
-	cfg      *config.Config
-	memStore *memory.Store
-	command  string // claude binary path, overridable for tests
+	mu          sync.Mutex
+	id          int
+	cmd         *exec.Cmd
+	stdin       io.WriteCloser
+	scanner     *bufio.Scanner
+	busy        bool
+	ready       bool
+	gobrrDir    string
+	cfg         *config.Config
+	memStore    *memory.Store
+	command     string // claude binary path, overridable for tests
+	lastRespawn time.Time
+	disabled    bool
 }
 
 // NewWarmWorker creates a WarmWorker. It is not started until Start() is called.
@@ -283,4 +290,27 @@ func (ww *WarmWorker) killLocked() {
 	ww.cmd = nil
 	ww.stdin = nil
 	ww.scanner = nil
+}
+
+// RecordRespawnAttempt marks a respawn attempt. Returns true if the respawn
+// is allowed to proceed; false if the slot has flapped (two respawns within
+// respawnFlapWindow) and should be disabled instead. Callers MUST honor
+// the returned value.
+func (ww *WarmWorker) RecordRespawnAttempt() bool {
+	ww.mu.Lock()
+	defer ww.mu.Unlock()
+	now := time.Now()
+	if !ww.lastRespawn.IsZero() && now.Sub(ww.lastRespawn) < respawnFlapWindow {
+		ww.disabled = true
+		return false
+	}
+	ww.lastRespawn = now
+	return true
+}
+
+// Disabled reports whether anti-flap has disabled this slot.
+func (ww *WarmWorker) Disabled() bool {
+	ww.mu.Lock()
+	defer ww.mu.Unlock()
+	return ww.disabled
 }

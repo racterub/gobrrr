@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/racterub/gobrrr/internal/config"
 	"github.com/stretchr/testify/assert"
@@ -231,6 +232,29 @@ done
 `
 	require.NoError(t, os.WriteFile(script, []byte(content), 0755))
 	return script
+}
+
+func TestWarmWorkerRespawnAllowedAfterTimeWindow(t *testing.T) {
+	ww := NewWarmWorker(0, "", nil, nil)
+
+	// First respawn is always allowed.
+	assert.True(t, ww.RecordRespawnAttempt())
+	// Immediate second respawn is blocked (within window).
+	assert.False(t, ww.RecordRespawnAttempt())
+	// Manually advance the recorded time beyond the window, then try again.
+	ww.mu.Lock()
+	ww.lastRespawn = time.Now().Add(-2 * respawnFlapWindow)
+	ww.mu.Unlock()
+	assert.True(t, ww.RecordRespawnAttempt())
+}
+
+func TestWarmWorkerDisabledAfterFlap(t *testing.T) {
+	ww := NewWarmWorker(0, "", nil, nil)
+
+	assert.True(t, ww.RecordRespawnAttempt())
+	assert.False(t, ww.RecordRespawnAttempt())
+
+	assert.True(t, ww.Disabled())
 }
 
 // writeStderrScript emits a stderr marker line at startup then behaves like
