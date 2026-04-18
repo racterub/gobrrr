@@ -16,6 +16,7 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, 2, cfg.MaxWorkers)
 	assert.Equal(t, 300, cfg.DefaultTimeoutSec)
 	assert.Equal(t, 5, cfg.SpawnIntervalSec)
+	assert.Equal(t, 1, cfg.WarmWorkers)
 	assert.Equal(t, 7, cfg.LogRetentionDays)
 	assert.Equal(t, 60, cfg.UptimeKuma.IntervalSec)
 }
