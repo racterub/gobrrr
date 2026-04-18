@@ -119,3 +119,53 @@ func TestLoadConfigPreservesTelegramSessionDefaults(t *testing.T) {
 	assert.Equal(t, 5, cfg.TelegramSession.IdleThresholdMin)
 	assert.Equal(t, 6, cfg.TelegramSession.MaxRestartAttempts)
 }
+
+func TestDefaultModelsConfig(t *testing.T) {
+	cfg := config.Default()
+
+	assert.Equal(t, "haiku", cfg.Models.Launcher.Model)
+	assert.Equal(t, "default", cfg.Models.Launcher.PermissionMode)
+
+	assert.Equal(t, "sonnet", cfg.Models.WarmWorker.Model)
+	assert.Equal(t, "auto", cfg.Models.WarmWorker.PermissionMode)
+
+	assert.Equal(t, "opus", cfg.Models.ColdWorker.Model)
+	assert.Equal(t, "auto", cfg.Models.ColdWorker.PermissionMode)
+}
+
+func TestLoadModelsFromFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	data := []byte(`{
+		"models": {
+			"launcher":    {"model": "haiku",  "permission_mode": "default"},
+			"warm_worker": {"model": "opus",   "permission_mode": "auto"},
+			"cold_worker": {"model": "sonnet", "permission_mode": "default"}
+		}
+	}`)
+	require.NoError(t, os.WriteFile(path, data, 0600))
+
+	cfg, err := config.Load(path)
+	require.NoError(t, err)
+
+	assert.Equal(t, "opus", cfg.Models.WarmWorker.Model)
+	assert.Equal(t, "sonnet", cfg.Models.ColdWorker.Model)
+	assert.Equal(t, "default", cfg.Models.ColdWorker.PermissionMode)
+}
+
+func TestLoadModelsPreservesDefaultsForMissingFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	// Partial models block: only launcher set.
+	data := []byte(`{"models": {"launcher": {"model": "haiku", "permission_mode": "default"}}}`)
+	require.NoError(t, os.WriteFile(path, data, 0600))
+
+	cfg, err := config.Load(path)
+	require.NoError(t, err)
+
+	assert.Equal(t, "sonnet", cfg.Models.WarmWorker.Model)
+	assert.Equal(t, "auto", cfg.Models.WarmWorker.PermissionMode)
+	assert.Equal(t, "opus", cfg.Models.ColdWorker.Model)
+}

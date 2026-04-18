@@ -30,6 +30,19 @@ type TelegramSessionConfig struct {
 	Channels           []string `json:"channels"`
 }
 
+// ModelConfig binds one role to a Claude model and permission mode.
+type ModelConfig struct {
+	Model          string `json:"model"`
+	PermissionMode string `json:"permission_mode"`
+}
+
+// ModelsConfig assigns a ModelConfig to each pipeline role.
+type ModelsConfig struct {
+	Launcher   ModelConfig `json:"launcher"`
+	WarmWorker ModelConfig `json:"warm_worker"`
+	ColdWorker ModelConfig `json:"cold_worker"`
+}
+
 // Config is the top-level daemon configuration.
 type Config struct {
 	Version           int              `json:"version"`
@@ -43,6 +56,7 @@ type Config struct {
 	Telegram          TelegramConfig        `json:"telegram"`
 	UptimeKuma        UptimeKumaConfig      `json:"uptime_kuma"`
 	TelegramSession   TelegramSessionConfig `json:"telegram_session"`
+	Models            ModelsConfig          `json:"models"`
 }
 
 // defaultWorkspacePath returns ~/workspace as the default working directory
@@ -77,6 +91,11 @@ func Default() *Config {
 			IdleThresholdMin:   5,
 			MaxRestartAttempts: 6,
 		},
+		Models: ModelsConfig{
+			Launcher:   ModelConfig{Model: "haiku", PermissionMode: "default"},
+			WarmWorker: ModelConfig{Model: "sonnet", PermissionMode: "auto"},
+			ColdWorker: ModelConfig{Model: "opus", PermissionMode: "auto"},
+		},
 	}
 }
 
@@ -98,6 +117,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyTelegramSessionDefaults(cfg)
+	applyModelsDefaults(cfg)
 
 	return cfg, nil
 }
@@ -120,6 +140,33 @@ func applyTelegramSessionDefaults(cfg *Config) {
 	}
 	if ts.MaxRestartAttempts == 0 {
 		ts.MaxRestartAttempts = d.MaxRestartAttempts
+	}
+}
+
+// applyModelsDefaults fills zero-value ModelConfig fields with defaults.
+// json.Unmarshal replaces nested structs with missing fields zeroed, so
+// defaults must be reapplied after unmarshal.
+func applyModelsDefaults(cfg *Config) {
+	d := Default().Models
+	m := &cfg.Models
+
+	if m.Launcher.Model == "" {
+		m.Launcher.Model = d.Launcher.Model
+	}
+	if m.Launcher.PermissionMode == "" {
+		m.Launcher.PermissionMode = d.Launcher.PermissionMode
+	}
+	if m.WarmWorker.Model == "" {
+		m.WarmWorker.Model = d.WarmWorker.Model
+	}
+	if m.WarmWorker.PermissionMode == "" {
+		m.WarmWorker.PermissionMode = d.WarmWorker.PermissionMode
+	}
+	if m.ColdWorker.Model == "" {
+		m.ColdWorker.Model = d.ColdWorker.Model
+	}
+	if m.ColdWorker.PermissionMode == "" {
+		m.ColdWorker.PermissionMode = d.ColdWorker.PermissionMode
 	}
 }
 
