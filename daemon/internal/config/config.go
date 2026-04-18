@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -118,6 +119,9 @@ func Load(path string) (*Config, error) {
 
 	applyTelegramSessionDefaults(cfg)
 	applyModelsDefaults(cfg)
+	if err := validateAndFixModels(cfg); err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
 }
@@ -141,6 +145,40 @@ func applyTelegramSessionDefaults(cfg *Config) {
 	if ts.MaxRestartAttempts == 0 {
 		ts.MaxRestartAttempts = d.MaxRestartAttempts
 	}
+}
+
+// validPermissionModes are the permission modes Claude Code accepts today.
+// Kept narrow on purpose — catches config typos fail-fast. Extend if Claude adds more.
+var validPermissionModes = map[string]struct{}{
+	"default":           {},
+	"acceptEdits":       {},
+	"plan":              {},
+	"auto":              {},
+	"bypassPermissions": {},
+}
+
+// validateAndFixModels returns an error for unknown permission modes.
+// Downgrades invalid role-mode combinations (haiku+auto) to safe defaults
+// and logs a warning to stderr.
+func validateAndFixModels(cfg *Config) error {
+	roles := []struct {
+		name string
+		cfg  *ModelConfig
+	}{
+		{"launcher", &cfg.Models.Launcher},
+		{"warm_worker", &cfg.Models.WarmWorker},
+		{"cold_worker", &cfg.Models.ColdWorker},
+	}
+	for _, r := range roles {
+		if _, ok := validPermissionModes[r.cfg.PermissionMode]; !ok {
+			return fmt.Errorf("models.%s.permission_mode: unknown value %q", r.name, r.cfg.PermissionMode)
+		}
+		if r.cfg.Model == "haiku" && r.cfg.PermissionMode == "auto" {
+			fmt.Fprintf(os.Stderr, "warning: models.%s haiku+auto not supported by Claude — falling back to default\n", r.name)
+			r.cfg.PermissionMode = "default"
+		}
+	}
+	return nil
 }
 
 // applyModelsDefaults fills zero-value ModelConfig fields with defaults.

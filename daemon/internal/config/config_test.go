@@ -168,4 +168,30 @@ func TestLoadModelsPreservesDefaultsForMissingFields(t *testing.T) {
 	assert.Equal(t, "sonnet", cfg.Models.WarmWorker.Model)
 	assert.Equal(t, "auto", cfg.Models.WarmWorker.PermissionMode)
 	assert.Equal(t, "opus", cfg.Models.ColdWorker.Model)
+	assert.Equal(t, "auto", cfg.Models.ColdWorker.PermissionMode)
+}
+
+func TestLoadRejectsUnknownPermissionMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	data := []byte(`{"models": {"warm_worker": {"model": "sonnet", "permission_mode": "nonsense"}}}`)
+	require.NoError(t, os.WriteFile(path, data, 0600))
+
+	_, err := config.Load(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nonsense")
+}
+
+func TestLoadFallsBackWhenLauncherHaikuAuto(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	// haiku + auto is rejected by Claude. Loader downgrades to default.
+	data := []byte(`{"models": {"launcher": {"model": "haiku", "permission_mode": "auto"}}}`)
+	require.NoError(t, os.WriteFile(path, data, 0600))
+
+	cfg, err := config.Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, "default", cfg.Models.Launcher.PermissionMode)
 }
