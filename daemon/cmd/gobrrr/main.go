@@ -17,6 +17,7 @@ import (
 	"github.com/racterub/gobrrr/internal/daemon"
 	"github.com/racterub/gobrrr/internal/memory"
 	"github.com/racterub/gobrrr/internal/setup"
+	"github.com/racterub/gobrrr/internal/skills"
 )
 
 func main() {
@@ -725,6 +726,41 @@ var setupGoogleAccountCmd = &cobra.Command{
 	},
 }
 
+var skillCmd = &cobra.Command{
+	Use:   "skill",
+	Short: "Manage worker skills",
+}
+
+var skillListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List installed skills",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cli := newClient()
+		list, err := cli.ListSkills()
+		if err != nil {
+			return err
+		}
+		if len(list) == 0 {
+			fmt.Println("No skills installed.")
+			return nil
+		}
+		byType := map[string][]skills.Skill{}
+		for _, s := range list {
+			byType[string(s.Type)] = append(byType[string(s.Type)], s)
+		}
+		for _, t := range []string{"system", "clawhub", "user"} {
+			if len(byType[t]) == 0 {
+				continue
+			}
+			fmt.Printf("[%s]\n", t)
+			for _, s := range byType[t] {
+				fmt.Printf("  %-20s  %s\n", s.Slug, s.Description)
+			}
+		}
+		return nil
+	},
+}
+
 func init() {
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
@@ -816,6 +852,9 @@ func init() {
 
 	timerCmd.AddCommand(timerCreateCmd, timerListCmd, timerRemoveCmd)
 	rootCmd.AddCommand(timerCmd)
+
+	skillCmd.AddCommand(skillListCmd)
+	rootCmd.AddCommand(skillCmd)
 
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(submitCmd)

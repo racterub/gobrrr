@@ -45,6 +45,7 @@ type Daemon struct {
 	startTime     time.Time
 	session       *session.Manager
 	scheduler     *scheduler.Scheduler
+	skillReg      *skills.Registry
 	ctx           context.Context
 }
 
@@ -126,6 +127,7 @@ func New(cfg *config.Config, socket string) *Daemon {
 		heartbeat:     hb,
 		healthChecker: hc,
 		confirmGate:   security.NewGate(5 * time.Minute),
+		skillReg:      skillReg,
 	}
 
 	// Session manager
@@ -195,7 +197,19 @@ func New(cfg *config.Config, socket string) *Daemon {
 	d.mux.HandleFunc("GET /schedules", d.handleListSchedules)
 	d.mux.HandleFunc("DELETE /schedules/{name}", d.handleRemoveSchedule)
 
+	d.mux.HandleFunc("GET /skills", d.handleListSkills)
+
 	return d
+}
+
+func (d *Daemon) handleListSkills(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if d.skillReg == nil {
+		_ = json.NewEncoder(w).Encode([]skills.Skill{})
+		return
+	}
+	list := d.skillReg.List()
+	_ = json.NewEncoder(w).Encode(list)
 }
 
 // Run starts the daemon and blocks until ctx is cancelled or a fatal error occurs.
