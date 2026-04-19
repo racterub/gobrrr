@@ -4,6 +4,12 @@
 // Default base URL: https://clawhub.ai
 package clawhub
 
+import (
+	"time"
+
+	"github.com/racterub/gobrrr/internal/skills"
+)
+
 // DefaultBaseURL is the canonical ClawHub registry.
 // clawhub.com 307-redirects here; the ClawHub CLI hardcodes this value.
 const DefaultBaseURL = "https://clawhub.ai"
@@ -58,4 +64,31 @@ type SkillPackage struct {
 	Version     string
 	SHA256      string
 	BundleBytes []byte
+}
+
+// InstallRequest is the pending-install record written to disk for user
+// approval. A human-in-the-loop Telegram confirmation consumes this; the
+// downstream commit step reads it back to execute the install.
+type InstallRequest struct {
+	RequestID        string             `json:"request_id"`
+	Slug             string             `json:"slug"`
+	Version          string             `json:"version"`
+	SourceURL        string             `json:"source_url"`
+	SHA256           string             `json:"sha256"`
+	StagingDir       string             `json:"staging_dir"`
+	Frontmatter      skills.Frontmatter `json:"frontmatter"`
+	MissingBins      []string           `json:"missing_bins"`
+	ProposedCommands []ProposedCommand  `json:"proposed_commands"`
+	CreatedAt        time.Time          `json:"created_at"`
+	ExpiresAt        time.Time          `json:"expires_at"`
+}
+
+// ProposedCommand is one "install this missing binary with this command"
+// suggestion attached to an InstallRequest. Exact command strings are
+// shown to the user verbatim for approval.
+type ProposedCommand struct {
+	RecipeID string   `json:"recipe_id"`
+	Kind     string   `json:"kind"` // brew|apt|apt-get|dnf|npm|go|uv
+	Command  string   `json:"command"`
+	Bins     []string `json:"bins"`
 }
