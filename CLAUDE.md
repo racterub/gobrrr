@@ -55,12 +55,16 @@ daemon/                        Go daemon and CLI
     daemon/
       daemon.go                Unix socket HTTP API, route registration
       queue.go                 Task queue with persistence, priority, crash recovery
-      worker.go                Worker pool, process spawning, identity/memory injection
+      worker.go                Worker pool, process spawning, identity/memory/skills injection
       routing.go               Result routing (telegram/stdout/file), output sanitization
       heartbeat.go             Uptime Kuma push heartbeats
       healthcheck.go           Health status evaluation (stuck tasks, failure streaks)
-      maintenance.go           Hourly log/queue pruning
+      maintenance.go           Hourly log/queue/install-request pruning
+      skill_routes.go          HTTP handlers for skill search/install/approve/deny/uninstall
       watchdog.go              Systemd sd_notify watchdog
+    skills/                    Skill loader, registry, prompt builder, embedded system skills
+      system/                  Bundled SKILL.md files embedded via //go:embed
+    clawhub/                   ClawHub V1 REST client, stager, committer
     google/
       auth.go                  Multi-account OAuth2, encrypted storage
       gmail.go                 Gmail API (list, read, send, reply)
@@ -78,7 +82,6 @@ daemon/                        Go daemon and CLI
     telegram/                  Bot API notification, message splitting
     setup/                     Interactive setup wizard
     client/                    HTTP-over-Unix-socket client for CLI
-  skills/                      SKILL.md files (gmail, calendar, browser, memory, dispatch, homelab, timer-management)
   systemd/                     gobrrr.service unit
   scripts/                     setup.sh, uninstall.sh
   go.mod                       Go module (github.com/racterub/gobrrr)
@@ -96,11 +99,27 @@ queue.json           Persistent task queue (atomic writes)
 identity.md          Assistant identity (user-editable)
 google/              Multi-account OAuth credentials (encrypted)
 memory/              Persistent memory entries + index
+skills/              Installed skills (system + ClawHub) — <slug>/SKILL.md + <slug>/_meta.json
+skills/_requests/    Pending install approvals (JSON + staged bundle dir, TTL 24h)
+skills/_lock.json    ClawHub install manifest (slug → version/SHA256)
 logs/                Per-task worker output
 workers/             Ephemeral per-task settings.json
 workspace/           Worker CWD
 output/              Safe directory for file: reply-to
 ```
+
+## Skills
+
+Workers see every installed skill via an `<available_skills>` block prepended to the prompt (built by `internal/skills.BuildPromptBlock`). Claude reads the referenced SKILL.md on demand; the block itself contains only name/description/path.
+
+Install flow:
+
+1. `gobrrr skill install <slug>` → daemon fetches the ZIP from ClawHub, verifies SHA256, stages under `skills/_requests/<id>_staging/`, writes an `InstallRequest` JSON, prints an approval card.
+2. `gobrrr skill approve <id>` → runs approved binary commands (unless `--skip-binary`), copies staged skill to `skills/<slug>/`, writes `_meta.json`, updates `skills/_lock.json`.
+3. `gobrrr skill deny <id>` removes the staged request.
+4. System skills (`type: system`, embedded in the binary) are copied to `skills/<slug>/` on daemon start and never overwritten.
+
+Permission merge: worker `settings.json` gains each installed skill's `approved_read_permissions` unconditionally and `approved_write_permissions` only when the task was submitted with `--allow-writes`.
 
 ## Key Design Decisions
 
