@@ -44,6 +44,11 @@ type ModelsConfig struct {
 	ColdWorker ModelConfig `json:"cold_worker"`
 }
 
+// ClawHubConfig holds ClawHub skill registry configuration.
+type ClawHubConfig struct {
+	RegistryURL string `json:"registry_url,omitempty"`
+}
+
 // Config is the top-level daemon configuration.
 type Config struct {
 	Version           int              `json:"version"`
@@ -58,6 +63,7 @@ type Config struct {
 	UptimeKuma        UptimeKumaConfig      `json:"uptime_kuma"`
 	TelegramSession   TelegramSessionConfig `json:"telegram_session"`
 	Models            ModelsConfig          `json:"models"`
+	ClawHub           ClawHubConfig         `json:"clawhub"`
 }
 
 // defaultWorkspacePath returns ~/workspace as the default working directory

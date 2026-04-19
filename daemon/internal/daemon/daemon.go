@@ -10,12 +10,14 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/racterub/gobrrr/internal/clawhub"
 	"github.com/racterub/gobrrr/internal/config"
 	vault "github.com/racterub/gobrrr/internal/crypto"
 	"github.com/racterub/gobrrr/internal/google"
@@ -46,6 +48,10 @@ type Daemon struct {
 	session       *session.Manager
 	scheduler     *scheduler.Scheduler
 	skillReg      *skills.Registry
+	skillsRoot    string
+	clawhub       *clawhub.Client
+	installer     *clawhub.Installer
+	committer     *clawhub.Committer
 	ctx           context.Context
 }
 
@@ -76,6 +82,11 @@ func New(cfg *config.Config, socket string) *Daemon {
 	if err := skillReg.Refresh(); err != nil {
 		log.Printf("daemon: refresh skills: %v", err)
 	}
+
+	// ClawHub wiring. Empty URL falls back to clawhub.DefaultBaseURL.
+	ch := clawhub.NewClient(cfg.ClawHub.RegistryURL)
+	installer := clawhub.NewInstaller(skillsRoot, cfg.ClawHub.RegistryURL, binOnPath)
+	committer := clawhub.NewCommitter(skillsRoot, nil)
 
 	wp := NewWorkerPool(q, cfg, cfg.MaxWorkers, spawnInterval, gobrrDir, ms, skillReg)
 
@@ -128,6 +139,10 @@ func New(cfg *config.Config, socket string) *Daemon {
 		healthChecker: hc,
 		confirmGate:   security.NewGate(5 * time.Minute),
 		skillReg:      skillReg,
+		skillsRoot:    skillsRoot,
+		clawhub:       ch,
+		installer:     installer,
+		committer:     committer,
 	}
 
 	// Session manager
@@ -198,6 +213,7 @@ func New(cfg *config.Config, socket string) *Daemon {
 	d.mux.HandleFunc("DELETE /schedules/{name}", d.handleRemoveSchedule)
 
 	d.mux.HandleFunc("GET /skills", d.handleListSkills)
+	d.registerSkillRoutes()
 
 	return d
 }
@@ -1093,4 +1109,9 @@ func (d *Daemon) handleRemoveSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "removed"}) //nolint:errcheck
+}
+
+func binOnPath(bin string) bool {
+	_, err := exec.LookPath(bin)
+	return err == nil
 }
