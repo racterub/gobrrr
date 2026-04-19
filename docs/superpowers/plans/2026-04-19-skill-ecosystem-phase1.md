@@ -1803,7 +1803,9 @@ If the API is substantially different from what the spec assumes, pause and upda
 - Create: `daemon/internal/clawhub/client.go`
 - Create: `daemon/internal/clawhub/client_test.go`
 
-**Responsibility:** Pure Go HTTP client for Search, Fetch (metadata), and tarball download with sha256 verification. Uses endpoints confirmed in Task 11.
+**Responsibility:** Pure Go HTTP client for Search, Fetch (metadata + version + zip bundle) with sha256 verification against `security.sha256hash`. Uses the V1 endpoints confirmed in Task 11.
+
+> **API reference:** See `docs/superpowers/notes/2026-04-19-clawhub-api.md` for the full endpoint surface, real response shapes, and the rationale for the two-step Fetch (metadata→version→download). The default registry base is `https://clawhub.ai`. The download returns a ZIP (not a tarball) — we keep the method name `Fetch` but call the bytes a "bundle" and store them as `BundleBytes`.
 
 - [ ] **Step 1: Write failing test with httptest fake server**
 
@@ -1826,9 +1828,13 @@ import (
 
 func TestClient_Search(t *testing.T) {
     mux := http.NewServeMux()
-    mux.HandleFunc("/api/skills/search", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/v1/search", func(w http.ResponseWriter, r *http.Request) {
         assert.Equal(t, "github", r.URL.Query().Get("q"))
-        fmt.Fprint(w, `[{"slug":"github","display_name":"GitHub","version":"1.4.2","description":"gh CLI ops"}]`)
+        assert.Equal(t, "10", r.URL.Query().Get("limit"))
+        w.Header().Set("Content-Type", "application/json")
+        fmt.Fprint(w, `{"results":[
+            {"score":3.7,"slug":"github","displayName":"Github","summary":"gh CLI ops","version":null,"updatedAt":1774865646622}
+        ]}`)
     })
     srv := httptest.NewServer(mux)
     defer srv.Close()
@@ -1838,45 +1844,112 @@ func TestClient_Search(t *testing.T) {
     require.NoError(t, err)
     require.Len(t, results, 1)
     assert.Equal(t, "github", results[0].Slug)
-    assert.Equal(t, "1.4.2", results[0].Version)
+    assert.Equal(t, "Github", results[0].DisplayName)
+    require.NotNil(t, results[0].Summary)
+    assert.Equal(t, "gh CLI ops", *results[0].Summary)
+    assert.Nil(t, results[0].Version, "search responses always return null version")
 }
 
-func TestClient_FetchAndVerifyTarball(t *testing.T) {
-    tarball := []byte("fake tarball content, treat as opaque")
-    sum := sha256.Sum256(tarball)
+func TestClient_FetchAndVerifyBundle(t *testing.T) {
+    zipBytes := []byte("fake zip bundle content, treat as opaque")
+    sum := sha256.Sum256(zipBytes)
     hexSum := hex.EncodeToString(sum[:])
 
     mux := http.NewServeMux()
-    mux.HandleFunc("/api/skills/github", func(w http.ResponseWriter, r *http.Request) {
-        fmt.Fprintf(w, `{"slug":"github","version":"1.4.2","sha256":"%s","tarball_url":"/tarballs/github-1.4.2.tar.gz"}`, hexSum)
+    // Metadata endpoint — resolves "latest" tag when caller passes version="".
+    mux.HandleFunc("/api/v1/skills/github", func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        fmt.Fprint(w, `{
+            "skill":{"slug":"github","displayName":"Github","summary":"gh ops","tags":{"latest":"1.0.0"}},
+            "latestVersion":{"version":"1.0.0","createdAt":0,"changelog":"","license":null}
+        }`)
     })
-    mux.HandleFunc("/tarballs/github-1.4.2.tar.gz", func(w http.ResponseWriter, r *http.Request) {
-        w.Write(tarball)
+    // Version detail — carries the integrity hash under security.sha256hash.
+    mux.HandleFunc("/api/v1/skills/github/versions/1.0.0", func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        fmt.Fprintf(w, `{
+            "skill":{"slug":"github","displayName":"Github"},
+            "version":{"version":"1.0.0","createdAt":0,"changelog":"","license":null,"files":[],
+                "security":{"status":"clean","hasWarnings":false,"sha256hash":"%s"}
+            }
+        }`, hexSum)
+    })
+    // Download — raw application/zip stream.
+    mux.HandleFunc("/api/v1/download", func(w http.ResponseWriter, r *http.Request) {
+        assert.Equal(t, "github", r.URL.Query().Get("slug"))
+        assert.Equal(t, "1.0.0", r.URL.Query().Get("version"))
+        w.Header().Set("Content-Type", "application/zip")
+        _, _ = w.Write(zipBytes)
     })
     srv := httptest.NewServer(mux)
     defer srv.Close()
 
     c := NewClient(srv.URL)
-    pkg, err := c.Fetch("github", "1.4.2")
+    pkg, err := c.Fetch("github", "1.0.0")
     require.NoError(t, err)
+    assert.Equal(t, "github", pkg.Slug)
+    assert.Equal(t, "1.0.0", pkg.Version)
     assert.Equal(t, hexSum, pkg.SHA256)
-    assert.Equal(t, tarball, pkg.TarballBytes)
+    assert.Equal(t, zipBytes, pkg.BundleBytes)
 }
 
-func TestClient_TarballChecksumMismatch(t *testing.T) {
+func TestClient_FetchResolvesLatestWhenVersionEmpty(t *testing.T) {
+    zipBytes := []byte("latest zip bytes")
+    sum := sha256.Sum256(zipBytes)
+    hexSum := hex.EncodeToString(sum[:])
+
     mux := http.NewServeMux()
-    mux.HandleFunc("/api/skills/github", func(w http.ResponseWriter, r *http.Request) {
-        fmt.Fprint(w, `{"slug":"github","version":"1.4.2","sha256":"deadbeef","tarball_url":"/tarballs/github-1.4.2.tar.gz"}`)
+    mux.HandleFunc("/api/v1/skills/github", func(w http.ResponseWriter, r *http.Request) {
+        fmt.Fprint(w, `{"skill":{"slug":"github","tags":{"latest":"2.1.0"}},"latestVersion":{"version":"2.1.0"}}`)
     })
-    mux.HandleFunc("/tarballs/github-1.4.2.tar.gz", func(w http.ResponseWriter, r *http.Request) {
-        w.Write([]byte("definitely not matching deadbeef"))
+    mux.HandleFunc("/api/v1/skills/github/versions/2.1.0", func(w http.ResponseWriter, r *http.Request) {
+        fmt.Fprintf(w, `{"version":{"version":"2.1.0","security":{"status":"clean","sha256hash":"%s"}}}`, hexSum)
+    })
+    mux.HandleFunc("/api/v1/download", func(w http.ResponseWriter, r *http.Request) {
+        assert.Equal(t, "2.1.0", r.URL.Query().Get("version"),
+            "client must resolve latest version before calling download")
+        _, _ = w.Write(zipBytes)
     })
     srv := httptest.NewServer(mux)
     defer srv.Close()
 
     c := NewClient(srv.URL)
-    _, err := c.Fetch("github", "1.4.2")
+    pkg, err := c.Fetch("github", "")
+    require.NoError(t, err)
+    assert.Equal(t, "2.1.0", pkg.Version)
+}
+
+func TestClient_BundleChecksumMismatch(t *testing.T) {
+    mux := http.NewServeMux()
+    mux.HandleFunc("/api/v1/skills/github", func(w http.ResponseWriter, r *http.Request) {
+        fmt.Fprint(w, `{"skill":{"slug":"github"},"latestVersion":{"version":"1.0.0"}}`)
+    })
+    mux.HandleFunc("/api/v1/skills/github/versions/1.0.0", func(w http.ResponseWriter, r *http.Request) {
+        fmt.Fprint(w, `{"version":{"version":"1.0.0","security":{"sha256hash":"deadbeef"}}}`)
+    })
+    mux.HandleFunc("/api/v1/download", func(w http.ResponseWriter, r *http.Request) {
+        _, _ = w.Write([]byte("definitely not matching deadbeef"))
+    })
+    srv := httptest.NewServer(mux)
+    defer srv.Close()
+
+    c := NewClient(srv.URL)
+    _, err := c.Fetch("github", "1.0.0")
+    require.Error(t, err)
     assert.ErrorContains(t, err, "checksum mismatch")
+}
+
+func TestClient_SearchNon200(t *testing.T) {
+    mux := http.NewServeMux()
+    mux.HandleFunc("/api/v1/search", func(w http.ResponseWriter, r *http.Request) {
+        http.Error(w, "rate limited", http.StatusTooManyRequests)
+    })
+    srv := httptest.NewServer(mux)
+    defer srv.Close()
+
+    _, err := NewClient(srv.URL).Search("x", 0)
+    require.Error(t, err)
+    assert.Contains(t, err.Error(), "429")
 }
 ```
 
@@ -1888,38 +1961,73 @@ cd daemon && go test ./internal/clawhub/... -v
 
 Expected: FAIL — package doesn't exist.
 
-- [ ] **Step 3: Create types.go**
+- [ ] **Step 3: Create `daemon/internal/clawhub/types.go`**
 
 ```go
 // Package clawhub is a Go client for the ClawHub skill registry.
+//
+// API reference: docs/superpowers/notes/2026-04-19-clawhub-api.md
+// Default base URL: https://clawhub.ai
 package clawhub
 
+// DefaultBaseURL is the canonical ClawHub registry.
+// clawhub.com 307-redirects here; the ClawHub CLI hardcodes this value.
+const DefaultBaseURL = "https://clawhub.ai"
+
+// SkillSummary is one entry in the search results array.
+// Version is always null in search responses; callers that need a concrete
+// version must call Fetch (which reads the "latest" tag from metadata).
 type SkillSummary struct {
-    Slug        string `json:"slug"`
-    DisplayName string `json:"display_name"`
-    Version     string `json:"version"`
-    Description string `json:"description"`
+    Score       float64 `json:"score"`
+    Slug        string  `json:"slug"`
+    DisplayName string  `json:"displayName"`
+    Summary     *string `json:"summary"`
+    Version     *string `json:"version"`
+    UpdatedAt   int64   `json:"updatedAt"`
 }
 
-type SkillMetadata struct {
-    Slug       string `json:"slug"`
-    Version    string `json:"version"`
-    SHA256     string `json:"sha256"`
-    TarballURL string `json:"tarball_url"`
+// searchResponse wraps the envelope returned by /api/v1/search.
+type searchResponse struct {
+    Results []SkillSummary `json:"results"`
 }
 
+// skillMetadata is the /api/v1/skills/<slug> response. We only unmarshal the
+// fields needed to resolve "latest" and present the skill to users.
+type skillMetadata struct {
+    Skill struct {
+        Slug        string            `json:"slug"`
+        DisplayName string            `json:"displayName"`
+        Summary     *string           `json:"summary"`
+        Tags        map[string]string `json:"tags"`
+    } `json:"skill"`
+    LatestVersion *struct {
+        Version string `json:"version"`
+    } `json:"latestVersion"`
+}
+
+// versionDetail is the /api/v1/skills/<slug>/versions/<version> response.
+// The integrity hash we verify against lives at version.security.sha256hash.
+type versionDetail struct {
+    Version struct {
+        Version  string `json:"version"`
+        Security *struct {
+            Status     string  `json:"status"`
+            SHA256Hash *string `json:"sha256hash"`
+        } `json:"security"`
+    } `json:"version"`
+}
+
+// SkillPackage is the resolved download: raw ZIP bytes plus integrity proof.
+// Downstream Task 13 extracts BundleBytes with archive/zip.
 type SkillPackage struct {
-    Slug         string
-    Version      string
-    SHA256       string
-    TarballURL   string
-    TarballBytes []byte
+    Slug        string
+    Version     string
+    SHA256      string
+    BundleBytes []byte
 }
 ```
 
-(Field names depend on actual ClawHub API from Task 11 — adjust to match.)
-
-- [ ] **Step 4: Create client.go**
+- [ ] **Step 4: Create `daemon/internal/clawhub/client.go`**
 
 ```go
 package clawhub
@@ -1937,20 +2045,31 @@ import (
     "time"
 )
 
+// Client talks to a ClawHub registry over HTTP. Zero auth required for reads.
 type Client struct {
     baseURL string
     http    *http.Client
 }
 
+// NewClient returns a Client targeting baseURL (usually DefaultBaseURL).
+// Passing "" uses DefaultBaseURL.
 func NewClient(baseURL string) *Client {
+    if baseURL == "" {
+        baseURL = DefaultBaseURL
+    }
     return &Client{
         baseURL: strings.TrimRight(baseURL, "/"),
         http:    &http.Client{Timeout: 30 * time.Second},
     }
 }
 
+// Search calls GET /api/v1/search?q=<query>&limit=<n> and returns the envelope's
+// results array. limit<=0 omits the limit parameter (server default applies).
 func (c *Client) Search(query string, limit int) ([]SkillSummary, error) {
-    u, _ := url.Parse(c.baseURL + "/api/skills/search")
+    u, err := url.Parse(c.baseURL + "/api/v1/search")
+    if err != nil {
+        return nil, err
+    }
     q := u.Query()
     q.Set("q", query)
     if limit > 0 {
@@ -1963,61 +2082,125 @@ func (c *Client) Search(query string, limit int) ([]SkillSummary, error) {
         return nil, err
     }
     defer resp.Body.Close()
-    if resp.StatusCode != 200 {
+    if resp.StatusCode != http.StatusOK {
         body, _ := io.ReadAll(resp.Body)
         return nil, fmt.Errorf("clawhub search %s: %s", resp.Status, string(body))
     }
-    var out []SkillSummary
-    if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-        return nil, err
+    var env searchResponse
+    if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+        return nil, fmt.Errorf("clawhub search: decode: %w", err)
     }
-    return out, nil
+    return env.Results, nil
 }
 
+// Fetch resolves the version (falling back to tags.latest when empty),
+// fetches the version detail to learn the bundle's sha256, downloads the
+// ZIP bundle, and verifies the integrity hash.
+//
+// On hash mismatch, returns an error — the bundle bytes are never exposed.
 func (c *Client) Fetch(slug, version string) (*SkillPackage, error) {
-    u := c.baseURL + "/api/skills/" + url.PathEscape(slug)
-    if version != "" {
-        u += "?version=" + url.QueryEscape(version)
+    if slug == "" {
+        return nil, fmt.Errorf("clawhub: empty slug")
     }
+
+    if version == "" {
+        meta, err := c.getMetadata(slug)
+        if err != nil {
+            return nil, err
+        }
+        switch {
+        case meta.LatestVersion != nil && meta.LatestVersion.Version != "":
+            version = meta.LatestVersion.Version
+        case meta.Skill.Tags["latest"] != "":
+            version = meta.Skill.Tags["latest"]
+        default:
+            return nil, fmt.Errorf("clawhub: %s has no latest version", slug)
+        }
+    }
+
+    detail, err := c.getVersionDetail(slug, version)
+    if err != nil {
+        return nil, err
+    }
+    if detail.Version.Security == nil || detail.Version.Security.SHA256Hash == nil || *detail.Version.Security.SHA256Hash == "" {
+        return nil, fmt.Errorf("clawhub: %s@%s has no sha256 hash in version detail", slug, version)
+    }
+    expectedHash := *detail.Version.Security.SHA256Hash
+
+    zipBytes, err := c.download(slug, version)
+    if err != nil {
+        return nil, err
+    }
+    sum := sha256.Sum256(zipBytes)
+    got := hex.EncodeToString(sum[:])
+    if got != expectedHash {
+        return nil, fmt.Errorf("clawhub: checksum mismatch for %s@%s: got %s, expected %s", slug, version, got, expectedHash)
+    }
+
+    return &SkillPackage{
+        Slug:        slug,
+        Version:     version,
+        SHA256:      expectedHash,
+        BundleBytes: zipBytes,
+    }, nil
+}
+
+func (c *Client) getMetadata(slug string) (*skillMetadata, error) {
+    u := c.baseURL + "/api/v1/skills/" + url.PathEscape(slug)
     resp, err := c.http.Get(u)
     if err != nil {
         return nil, err
     }
     defer resp.Body.Close()
-    if resp.StatusCode != 200 {
+    if resp.StatusCode != http.StatusOK {
         body, _ := io.ReadAll(resp.Body)
-        return nil, fmt.Errorf("clawhub fetch %s: %s", resp.Status, string(body))
+        return nil, fmt.Errorf("clawhub metadata %s: %s: %s", slug, resp.Status, string(body))
     }
-    var meta SkillMetadata
-    if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
-        return nil, err
+    var out skillMetadata
+    if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+        return nil, fmt.Errorf("clawhub metadata %s: decode: %w", slug, err)
     }
+    return &out, nil
+}
 
-    tarURL := meta.TarballURL
-    if strings.HasPrefix(tarURL, "/") {
-        tarURL = c.baseURL + tarURL
-    }
-    tresp, err := c.http.Get(tarURL)
+func (c *Client) getVersionDetail(slug, version string) (*versionDetail, error) {
+    u := c.baseURL + "/api/v1/skills/" + url.PathEscape(slug) + "/versions/" + url.PathEscape(version)
+    resp, err := c.http.Get(u)
     if err != nil {
         return nil, err
     }
-    defer tresp.Body.Close()
-    tarball, err := io.ReadAll(tresp.Body)
+    defer resp.Body.Close()
+    if resp.StatusCode != http.StatusOK {
+        body, _ := io.ReadAll(resp.Body)
+        return nil, fmt.Errorf("clawhub version %s@%s: %s: %s", slug, version, resp.Status, string(body))
+    }
+    var out versionDetail
+    if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+        return nil, fmt.Errorf("clawhub version %s@%s: decode: %w", slug, version, err)
+    }
+    return &out, nil
+}
+
+func (c *Client) download(slug, version string) ([]byte, error) {
+    u, err := url.Parse(c.baseURL + "/api/v1/download")
     if err != nil {
         return nil, err
     }
-    sum := sha256.Sum256(tarball)
-    got := hex.EncodeToString(sum[:])
-    if got != meta.SHA256 {
-        return nil, fmt.Errorf("clawhub: checksum mismatch for %s@%s: got %s, expected %s", slug, version, got, meta.SHA256)
+    q := u.Query()
+    q.Set("slug", slug)
+    q.Set("version", version)
+    u.RawQuery = q.Encode()
+
+    resp, err := c.http.Get(u.String())
+    if err != nil {
+        return nil, err
     }
-    return &SkillPackage{
-        Slug:         meta.Slug,
-        Version:      meta.Version,
-        SHA256:       meta.SHA256,
-        TarballURL:   meta.TarballURL,
-        TarballBytes: tarball,
-    }, nil
+    defer resp.Body.Close()
+    if resp.StatusCode != http.StatusOK {
+        body, _ := io.ReadAll(resp.Body)
+        return nil, fmt.Errorf("clawhub download %s@%s: %s: %s", slug, version, resp.Status, string(body))
+    }
+    return io.ReadAll(resp.Body)
 }
 ```
 
@@ -2027,14 +2210,14 @@ func (c *Client) Fetch(slug, version string) (*SkillPackage, error) {
 cd daemon && go test ./internal/clawhub/... -v
 ```
 
-Expected: PASS.
+Expected: PASS (all five tests).
 
 - [ ] **Step 6: Commit**
 
 ```bash
 cd /home/racterub/github/gobrrr
 git add daemon/internal/clawhub/
-git commit -m "feat(clawhub): add Go HTTP client for search and tarball fetch"
+git commit -m "feat(clawhub): add Go HTTP client for V1 search and bundle fetch"
 ```
 
 ---
