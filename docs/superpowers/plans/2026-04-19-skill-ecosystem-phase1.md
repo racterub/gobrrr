@@ -3233,402 +3233,460 @@ git commit -m "feat(clawhub): commit approved install with binary run, copy, loc
 ### Task 15: Daemon HTTP endpoints for skill lifecycle + CLI
 
 **Files:**
-- Modify: `daemon/internal/daemon/daemon.go` (register routes + keep `d.skillReg`, `d.clawhub` fields)
+- Modify: `daemon/internal/config/config.go` (add `ClawHubConfig`)
+- Modify: `daemon/internal/daemon/daemon.go` (add `skillsRoot`, `clawhub`, `installer`, `committer` fields + wire + register routes)
 - Create: `daemon/internal/daemon/skill_routes.go` (handlers)
 - Modify: `daemon/internal/client/skill.go` (add lifecycle methods)
-- Modify: `daemon/cmd/gobrrr/main.go` (add subcommands: search, install, approve, deny, uninstall, info)
+- Modify: `daemon/cmd/gobrrr/main.go` (register subcommands: search, install, approve, deny, uninstall)
 
-**Responsibility:** Expose `POST /skills/install`, `POST /skills/approve/:id`, `POST /skills/deny/:id`, `DELETE /skills/:slug`, `GET /skills/search?q=`, `GET /skills/:slug`. CLI wraps each.
+**Responsibility:** Expose `POST /skills/install`, `POST /skills/approve/{id}`, `POST /skills/deny/{id}`, `DELETE /skills/{slug}`, `GET /skills/search`. The existing `GET /skills` (list installed) stays as-is. CLI wraps each.
 
-- [ ] **Step 1: Add daemon fields**
+> **Deltas from initial plan sketch (confirmed against current code):**
+> - `daemon.Daemon` already has `skillReg *skills.Registry` and `skillsRoot` is derived in `New`. Task just adds `clawhub`, `installer`, `committer` fields.
+> - Default ClawHub URL is `https://clawhub.ai` (Task 11 recon); pass `""` to `clawhub.NewClient` so it falls back to `DefaultBaseURL`.
+> - `clawhub.NewInstaller` takes three args: `(skillsRoot, registryBaseURL, hasBin)`.
+> - `client.Client` exposes `c.httpClient` and `c.baseURL` (not `c.http` / `"http://unix/…"`). CLI helper is `newClient()`, not `client.New()`.
+> - `clawhub.SkillSummary` fields are `Slug`, `DisplayName`, `Summary *string`, `Version *string` (both pointers; version can be nil). Use those — no `Description` field.
+> - `GET /skills` is already registered via existing `handleListSkills` at the path `/skills` — do NOT re-register it.
 
-In `daemon.go`:
+- [ ] **Step 1: Add `ClawHub` config section**
+
+Modify `daemon/internal/config/config.go`. Add a `ClawHubConfig` type and field (fit it next to other config sections like `Telegram`, `UptimeKuma`):
 
 ```go
-type Daemon struct {
-    // ... existing fields
-    skillsRoot string
-    skillReg   *skills.Registry
-    clawhub    *clawhub.Client
-    installer  *clawhub.Installer
-    committer  *clawhub.Committer
+type ClawHubConfig struct {
+    RegistryURL string `json:"registry_url,omitempty"`
 }
 ```
 
-Constructor wiring:
+Add a `ClawHub ClawHubConfig `json:"clawhub"`` field to the existing `Config` struct.
+
+- [ ] **Step 2: Extend `Daemon` struct and constructor**
+
+In `daemon/internal/daemon/daemon.go`:
+
+Add these fields to the existing `Daemon` struct (place near the existing `skillReg` field — keep `skillReg` as-is):
 
 ```go
-d.skillsRoot = filepath.Join(gobrrDir, "skills")
-_ = skills.InstallSystemSkills(d.skillsRoot)
-d.skillReg = skills.NewRegistry(d.skillsRoot)
-_ = d.skillReg.Refresh()
+skillsRoot string
+clawhub    *clawhub.Client
+installer  *clawhub.Installer
+committer  *clawhub.Committer
+```
 
-clawhubURL := cfg.ClawHub.RegistryURL
-if clawhubURL == "" {
-    clawhubURL = "https://clawhub.com"
-}
-d.clawhub = clawhub.NewClient(clawhubURL)
-d.installer = clawhub.NewInstaller(d.skillsRoot, binOnPath)
-d.committer = clawhub.NewCommitter(d.skillsRoot, nil)
+In the `New` constructor, after the existing `skillReg` setup block (around line 78), add:
 
+```go
+// ClawHub wiring. Empty URL falls back to clawhub.DefaultBaseURL.
+ch := clawhub.NewClient(cfg.ClawHub.RegistryURL)
+installer := clawhub.NewInstaller(skillsRoot, cfg.ClawHub.RegistryURL, binOnPath)
+committer := clawhub.NewCommitter(skillsRoot, nil)
+```
+
+Set these on the `d := &Daemon{…}` literal:
+
+```go
+skillsRoot: skillsRoot,
+clawhub:    ch,
+installer:  installer,
+committer:  committer,
+```
+
+Add a package-level helper at the bottom of `daemon.go`:
+
+```go
 func binOnPath(bin string) bool {
     _, err := exec.LookPath(bin)
     return err == nil
 }
 ```
 
-Add `ClawHub` config section in `daemon/internal/config/`:
+Ensure `os/exec` is in `daemon.go` imports (add if missing).
 
-```go
-type ClawHubConfig struct {
-    RegistryURL string `json:"registry_url"`
-}
+After the existing `d.mux.HandleFunc("GET /skills", d.handleListSkills)` line, call `d.registerSkillRoutes()`.
 
-type Config struct {
-    // ... existing fields
-    ClawHub ClawHubConfig `json:"clawhub"`
-}
-```
-
-- [ ] **Step 2: Implement skill_routes.go**
+- [ ] **Step 3: Create `daemon/internal/daemon/skill_routes.go`**
 
 ```go
 package daemon
 
 import (
-    "encoding/json"
-    "fmt"
-    "net/http"
-    "os"
-    "path/filepath"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
 
-    "github.com/racterub/gobrrr/internal/clawhub"
+	"github.com/racterub/gobrrr/internal/clawhub"
 )
 
-func (d *Daemon) registerSkillRoutes(mux *http.ServeMux) {
-    mux.HandleFunc("GET /skills", d.handleSkillsList)
-    mux.HandleFunc("GET /skills/search", d.handleSkillsSearch)
-    mux.HandleFunc("POST /skills/install", d.handleSkillsInstall)
-    mux.HandleFunc("POST /skills/approve/{id}", d.handleSkillsApprove)
-    mux.HandleFunc("POST /skills/deny/{id}", d.handleSkillsDeny)
-    mux.HandleFunc("DELETE /skills/{slug}", d.handleSkillsUninstall)
-}
-
-func (d *Daemon) handleSkillsList(w http.ResponseWriter, r *http.Request) {
-    writeJSON(w, d.skillReg.List())
+func (d *Daemon) registerSkillRoutes() {
+	d.mux.HandleFunc("GET /skills/search", d.handleSkillsSearch)
+	d.mux.HandleFunc("POST /skills/install", d.handleSkillsInstall)
+	d.mux.HandleFunc("POST /skills/approve/{id}", d.handleSkillsApprove)
+	d.mux.HandleFunc("POST /skills/deny/{id}", d.handleSkillsDeny)
+	d.mux.HandleFunc("DELETE /skills/{slug}", d.handleSkillsUninstall)
 }
 
 func (d *Daemon) handleSkillsSearch(w http.ResponseWriter, r *http.Request) {
-    q := r.URL.Query().Get("q")
-    limit := 20
-    results, err := d.clawhub.Search(q, limit)
-    if err != nil {
-        http.Error(w, err.Error(), 502)
-        return
-    }
-    writeJSON(w, results)
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		http.Error(w, "missing q parameter", http.StatusBadRequest)
+		return
+	}
+	results, err := d.clawhub.Search(q, 20)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeSkillJSON(w, results)
 }
 
 type installReq struct {
-    Slug    string `json:"slug"`
-    Version string `json:"version,omitempty"`
+	Slug    string `json:"slug"`
+	Version string `json:"version,omitempty"`
 }
 
 func (d *Daemon) handleSkillsInstall(w http.ResponseWriter, r *http.Request) {
-    var body installReq
-    if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-        http.Error(w, err.Error(), 400)
-        return
-    }
-    pkg, err := d.clawhub.Fetch(body.Slug, body.Version)
-    if err != nil {
-        http.Error(w, err.Error(), 502)
-        return
-    }
-    reqID, err := d.installer.Stage(pkg)
-    if err != nil {
-        http.Error(w, err.Error(), 500)
-        return
-    }
-    // Return the install request so CLI can render the approval card.
-    reqPath := filepath.Join(d.skillsRoot, "_requests", reqID+".json")
-    data, err := os.ReadFile(reqPath)
-    if err != nil {
-        http.Error(w, err.Error(), 500)
-        return
-    }
-    var req clawhub.InstallRequest
-    _ = json.Unmarshal(data, &req)
-    writeJSON(w, map[string]any{
-        "request_id": reqID,
-        "request":    req,
-    })
+	var body installReq
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if body.Slug == "" {
+		http.Error(w, "missing slug", http.StatusBadRequest)
+		return
+	}
+	pkg, err := d.clawhub.Fetch(body.Slug, body.Version)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	reqID, err := d.installer.Stage(pkg)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	reqPath := filepath.Join(d.skillsRoot, "_requests", reqID+".json")
+	data, err := os.ReadFile(reqPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var req clawhub.InstallRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeSkillJSON(w, map[string]any{
+		"request_id": reqID,
+		"request":    req,
+	})
 }
 
 type approveReq struct {
-    SkipBinary bool `json:"skip_binary,omitempty"`
+	SkipBinary bool `json:"skip_binary,omitempty"`
 }
 
 func (d *Daemon) handleSkillsApprove(w http.ResponseWriter, r *http.Request) {
-    id := r.PathValue("id")
-    var body approveReq
-    _ = json.NewDecoder(r.Body).Decode(&body)
-    if err := d.committer.Commit(id, clawhub.Decision{Approve: true, SkipBinary: body.SkipBinary}); err != nil {
-        http.Error(w, err.Error(), 500)
-        return
-    }
-    if err := d.skillReg.Refresh(); err != nil {
-        http.Error(w, err.Error(), 500)
-        return
-    }
-    fmt.Fprintln(w, "approved")
+	id := r.PathValue("id")
+	var body approveReq
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if err := d.committer.Commit(id, clawhub.Decision{Approve: true, SkipBinary: body.SkipBinary}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := d.skillReg.Refresh(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintln(w, "approved")
 }
 
 func (d *Daemon) handleSkillsDeny(w http.ResponseWriter, r *http.Request) {
-    id := r.PathValue("id")
-    if err := d.committer.Commit(id, clawhub.Decision{Approve: false}); err != nil {
-        http.Error(w, err.Error(), 500)
-        return
-    }
-    fmt.Fprintln(w, "denied")
+	id := r.PathValue("id")
+	if err := d.committer.Commit(id, clawhub.Decision{Approve: false}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintln(w, "denied")
 }
 
 func (d *Daemon) handleSkillsUninstall(w http.ResponseWriter, r *http.Request) {
-    slug := r.PathValue("slug")
-    dir := filepath.Join(d.skillsRoot, slug)
-    if err := os.RemoveAll(dir); err != nil {
-        http.Error(w, err.Error(), 500)
-        return
-    }
-    if err := d.skillReg.Refresh(); err != nil {
-        http.Error(w, err.Error(), 500)
-        return
-    }
-    fmt.Fprintf(w, "uninstalled %s\n", slug)
+	slug := r.PathValue("slug")
+	if slug == "" {
+		http.Error(w, "missing slug", http.StatusBadRequest)
+		return
+	}
+	dir := filepath.Join(d.skillsRoot, slug)
+	if err := os.RemoveAll(dir); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := d.skillReg.Refresh(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintf(w, "uninstalled %s\n", slug)
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
-    w.Header().Set("Content-Type", "application/json")
-    _ = json.NewEncoder(w).Encode(v)
+func writeSkillJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
 }
 ```
 
-Wire `d.registerSkillRoutes(mux)` in the daemon's existing route registration function.
+- [ ] **Step 4: Extend `daemon/internal/client/skill.go`**
 
-- [ ] **Step 3: Extend client**
-
-Open `daemon/internal/client/skill.go` and merge these imports into the existing `import (...)` block (do not add a second import block):
+Merge the following new imports into the existing single `import (...)` block (do NOT create a second block):
 
 ```go
 "bytes"
-"encoding/json"
-"fmt"
-"io"
-"net/http"
 "net/url"
 
 "github.com/racterub/gobrrr/internal/clawhub"
 ```
 
-Then append the following functions to the same file:
+(`encoding/json`, `fmt`, `io`, `net/http`, and `skills` are already imported.)
+
+Append these functions at the end of the file (all use `c.httpClient` + `c.baseURL`, matching the existing `ListSkills` style):
 
 ```go
+// SearchSkills queries the daemon's ClawHub proxy.
 func (c *Client) SearchSkills(q string) ([]clawhub.SkillSummary, error) {
-    resp, err := c.http.Get("http://unix/skills/search?q=" + url.QueryEscape(q))
-    if err != nil { return nil, err }
-    defer resp.Body.Close()
-    if resp.StatusCode != 200 {
-        body, _ := io.ReadAll(resp.Body)
-        return nil, fmt.Errorf("search: %s: %s", resp.Status, string(body))
-    }
-    var out []clawhub.SkillSummary
-    return out, json.NewDecoder(resp.Body).Decode(&out)
+	resp, err := c.httpClient.Get(c.baseURL + "/skills/search?q=" + url.QueryEscape(q))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("search skills: %s: %s", resp.Status, string(body))
+	}
+	var out []clawhub.SkillSummary
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
+// InstallResult is what the daemon returns after staging an install.
 type InstallResult struct {
-    RequestID string                  `json:"request_id"`
-    Request   clawhub.InstallRequest  `json:"request"`
+	RequestID string                 `json:"request_id"`
+	Request   clawhub.InstallRequest `json:"request"`
 }
 
+// InstallSkill asks the daemon to fetch & stage <slug>[@version]; version="" for latest.
 func (c *Client) InstallSkill(slug, version string) (*InstallResult, error) {
-    body, _ := json.Marshal(map[string]string{"slug": slug, "version": version})
-    resp, err := c.http.Post("http://unix/skills/install", "application/json", bytes.NewReader(body))
-    if err != nil { return nil, err }
-    defer resp.Body.Close()
-    if resp.StatusCode != 200 {
-        b, _ := io.ReadAll(resp.Body)
-        return nil, fmt.Errorf("install: %s: %s", resp.Status, string(b))
-    }
-    var out InstallResult
-    return &out, json.NewDecoder(resp.Body).Decode(&out)
+	body, _ := json.Marshal(map[string]string{"slug": slug, "version": version})
+	resp, err := c.httpClient.Post(c.baseURL+"/skills/install", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("install skill: %s: %s", resp.Status, string(b))
+	}
+	var out InstallResult
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
+// ApproveSkill finalizes a staged install. If skipBinary is true, binaries are not installed.
 func (c *Client) ApproveSkill(reqID string, skipBinary bool) error {
-    body, _ := json.Marshal(map[string]bool{"skip_binary": skipBinary})
-    return c.postSimple("http://unix/skills/approve/"+reqID, body)
+	body, _ := json.Marshal(map[string]bool{"skip_binary": skipBinary})
+	return c.postSkillSimple("/skills/approve/"+reqID, body)
 }
 
+// DenySkill discards a staged install.
 func (c *Client) DenySkill(reqID string) error {
-    return c.postSimple("http://unix/skills/deny/"+reqID, nil)
+	return c.postSkillSimple("/skills/deny/"+reqID, nil)
 }
 
+// UninstallSkill removes an installed skill from ~/.gobrrr/skills/<slug>.
 func (c *Client) UninstallSkill(slug string) error {
-    req, _ := http.NewRequest("DELETE", "http://unix/skills/"+slug, nil)
-    resp, err := c.http.Do(req)
-    if err != nil { return err }
-    defer resp.Body.Close()
-    if resp.StatusCode != 200 {
-        b, _ := io.ReadAll(resp.Body)
-        return fmt.Errorf("uninstall: %s: %s", resp.Status, string(b))
-    }
-    return nil
+	req, err := http.NewRequest(http.MethodDelete, c.baseURL+"/skills/"+slug, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("uninstall skill: %s: %s", resp.Status, string(b))
+	}
+	return nil
 }
 
-func (c *Client) postSimple(url string, body []byte) error {
-    resp, err := c.http.Post(url, "application/json", bytes.NewReader(body))
-    if err != nil { return err }
-    defer resp.Body.Close()
-    if resp.StatusCode != 200 {
-        b, _ := io.ReadAll(resp.Body)
-        return fmt.Errorf("%s: %s", resp.Status, string(b))
-    }
-    return nil
+func (c *Client) postSkillSimple(path string, body []byte) error {
+	resp, err := c.httpClient.Post(c.baseURL+path, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("%s: %s", resp.Status, string(b))
+	}
+	return nil
 }
 ```
 
-- [ ] **Step 4: Add CLI subcommands**
+- [ ] **Step 5: Add CLI subcommands to `daemon/cmd/gobrrr/main.go`**
 
-In `daemon/cmd/gobrrr/main.go`:
+The `skillCmd` and `skillListCmd` already exist; add these new var declarations at the end of the block where `skillListCmd` is defined:
 
 ```go
 var skillSearchCmd = &cobra.Command{
-    Use:   "search <query>",
-    Short: "Search ClawHub for skills",
-    Args:  cobra.ExactArgs(1),
-    RunE: func(cmd *cobra.Command, args []string) error {
-        cli := client.New()
-        results, err := cli.SearchSkills(args[0])
-        if err != nil {
-            return err
-        }
-        if len(results) == 0 {
-            fmt.Println("No matches.")
-            return nil
-        }
-        for _, r := range results {
-            fmt.Printf("%-24s %-10s  %s\n", r.Slug, r.Version, r.Description)
-        }
-        return nil
-    },
+	Use:   "search <query>",
+	Short: "Search ClawHub for skills",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		results, err := newClient().SearchSkills(args[0])
+		if err != nil {
+			return err
+		}
+		if len(results) == 0 {
+			fmt.Println("No matches.")
+			return nil
+		}
+		for _, r := range results {
+			summary := ""
+			if r.Summary != nil {
+				summary = *r.Summary
+			}
+			fmt.Printf("%-24s  %s\n", r.Slug, summary)
+		}
+		return nil
+	},
 }
 
 var skillInstallCmd = &cobra.Command{
-    Use:   "install <slug>[@version]",
-    Short: "Stage a ClawHub skill install (prints approval card)",
-    Args:  cobra.ExactArgs(1),
-    RunE: func(cmd *cobra.Command, args []string) error {
-        slug, version := parseSlugVersion(args[0])
-        cli := client.New()
-        res, err := cli.InstallSkill(slug, version)
-        if err != nil {
-            return err
-        }
-        printApprovalCard(res)
-        return nil
-    },
+	Use:   "install <slug>[@version]",
+	Short: "Stage a ClawHub skill install (prints approval card)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		slug, version := parseSlugVersion(args[0])
+		res, err := newClient().InstallSkill(slug, version)
+		if err != nil {
+			return err
+		}
+		printApprovalCard(res)
+		return nil
+	},
 }
 
 var skillApproveCmd = &cobra.Command{
-    Use:   "approve <request-id>",
-    Short: "Approve a staged skill install",
-    Args:  cobra.ExactArgs(1),
-    RunE: func(cmd *cobra.Command, args []string) error {
-        skip, _ := cmd.Flags().GetBool("skip-binary")
-        return client.New().ApproveSkill(args[0], skip)
-    },
+	Use:   "approve <request-id>",
+	Short: "Approve a staged skill install",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		skip, _ := cmd.Flags().GetBool("skip-binary")
+		return newClient().ApproveSkill(args[0], skip)
+	},
 }
 
 var skillDenyCmd = &cobra.Command{
-    Use:   "deny <request-id>",
-    Short: "Deny a staged skill install",
-    Args:  cobra.ExactArgs(1),
-    RunE: func(cmd *cobra.Command, args []string) error {
-        return client.New().DenySkill(args[0])
-    },
+	Use:   "deny <request-id>",
+	Short: "Deny a staged skill install",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return newClient().DenySkill(args[0])
+	},
 }
 
 var skillUninstallCmd = &cobra.Command{
-    Use:   "uninstall <slug>",
-    Short: "Uninstall a skill",
-    Args:  cobra.ExactArgs(1),
-    RunE: func(cmd *cobra.Command, args []string) error {
-        return client.New().UninstallSkill(args[0])
-    },
-}
-
-func init() {
-    skillApproveCmd.Flags().Bool("skip-binary", false, "approve skill only, skip binary install commands")
-    skillCmd.AddCommand(skillSearchCmd, skillInstallCmd, skillApproveCmd, skillDenyCmd, skillUninstallCmd)
+	Use:   "uninstall <slug>",
+	Short: "Uninstall a skill",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return newClient().UninstallSkill(args[0])
+	},
 }
 
 func parseSlugVersion(s string) (string, string) {
-    if i := strings.Index(s, "@"); i > 0 {
-        return s[:i], s[i+1:]
-    }
-    return s, ""
+	if i := strings.Index(s, "@"); i > 0 {
+		return s[:i], s[i+1:]
+	}
+	return s, ""
 }
 
 func printApprovalCard(r *client.InstallResult) {
-    req := r.Request
-    fmt.Printf("Install skill: %s@%s\n", req.Slug, req.Version)
-    fmt.Printf("  Source: %s  sha256: %s\n", req.SourceURL, req.SHA256)
-    fmt.Printf("  Description: %s\n\n", req.Frontmatter.Description)
+	req := r.Request
+	fmt.Printf("Install skill: %s@%s\n", req.Slug, req.Version)
+	fmt.Printf("  Source: %s\n  sha256: %s\n", req.SourceURL, req.SHA256)
+	if req.Frontmatter.Description != "" {
+		fmt.Printf("  Description: %s\n", req.Frontmatter.Description)
+	}
+	fmt.Println()
 
-    if len(req.MissingBins) > 0 {
-        fmt.Printf("  Requires binaries: %s  (not on PATH)\n", strings.Join(req.MissingBins, ", "))
-        for _, p := range req.ProposedCommands {
-            fmt.Printf("    Proposed install:  %s\n", p.Command)
-        }
-        fmt.Println()
-    }
+	if len(req.MissingBins) > 0 {
+		fmt.Printf("  Requires binaries: %s  (not on PATH)\n", strings.Join(req.MissingBins, ", "))
+		for _, p := range req.ProposedCommands {
+			fmt.Printf("    Proposed install:  %s\n", p.Command)
+		}
+		fmt.Println()
+	}
 
-    reads := req.Frontmatter.Metadata.OpenClaw.Requires.ToolPermissions.Read
-    writes := req.Frontmatter.Metadata.OpenClaw.Requires.ToolPermissions.Write
-    if len(reads) > 0 {
-        fmt.Println("  Tool permissions (read, always allowed):")
-        for _, p := range reads {
-            fmt.Printf("    %s\n", p)
-        }
-    }
-    if len(writes) > 0 {
-        fmt.Println("\n  Tool permissions (write, require --allow-writes on task):")
-        for _, p := range writes {
-            fmt.Printf("    %s\n", p)
-        }
-    }
+	reads := req.Frontmatter.Metadata.OpenClaw.Requires.ToolPermissions.Read
+	writes := req.Frontmatter.Metadata.OpenClaw.Requires.ToolPermissions.Write
+	if len(reads) > 0 {
+		fmt.Println("  Tool permissions (read, always allowed):")
+		for _, p := range reads {
+			fmt.Printf("    %s\n", p)
+		}
+	}
+	if len(writes) > 0 {
+		fmt.Println("\n  Tool permissions (write, require --allow-writes on task):")
+		for _, p := range writes {
+			fmt.Printf("    %s\n", p)
+		}
+	}
 
-    fmt.Printf("\n  Request ID: %s\n\n", r.RequestID)
-    fmt.Printf("  To proceed:  gobrrr skill approve %s\n", r.RequestID)
-    fmt.Printf("  Skill only:  gobrrr skill approve %s --skip-binary\n", r.RequestID)
-    fmt.Printf("  Cancel:      gobrrr skill deny %s\n", r.RequestID)
+	fmt.Printf("\n  Request ID: %s\n\n", r.RequestID)
+	fmt.Printf("  To proceed:  gobrrr skill approve %s\n", r.RequestID)
+	fmt.Printf("  Skill only:  gobrrr skill approve %s --skip-binary\n", r.RequestID)
+	fmt.Printf("  Cancel:      gobrrr skill deny %s\n", r.RequestID)
 }
 ```
 
-- [ ] **Step 5: Run tests + build**
+Ensure `strings` is in the `main.go` imports (add if missing).
 
-```bash
-cd daemon && go test ./... -v
-cd daemon && CGO_ENABLED=0 go build -o /tmp/gobrrr ./cmd/gobrrr/
+In the existing `init()` (near the bottom, where `skillCmd.AddCommand(skillListCmd)` is called), change that single `AddCommand` to include all new subcommands and set the `--skip-binary` flag:
+
+```go
+skillApproveCmd.Flags().Bool("skip-binary", false, "approve skill only, skip binary install commands")
+skillCmd.AddCommand(skillListCmd, skillSearchCmd, skillInstallCmd, skillApproveCmd, skillDenyCmd, skillUninstallCmd)
 ```
 
-Expected: all tests PASS, build OK.
+- [ ] **Step 6: Verify**
 
-- [ ] **Step 6: Commit**
+```bash
+cd /home/racterub/github/gobrrr/daemon && go build ./... && go vet ./... && go test ./... 2>&1 | tail -20
+```
+
+Expected: build OK, vet clean, all existing tests still pass. No new tests are required for this task — the routes are thin wrappers over Task 12–14 logic, already test-covered; the integration test in Task 17 exercises the full pipeline end-to-end.
+
+Also rebuild the CLI binary to confirm linkage:
+
+```bash
+cd /home/racterub/github/gobrrr/daemon && CGO_ENABLED=0 go build -o /tmp/gobrrr-check ./cmd/gobrrr/ && /tmp/gobrrr-check skill --help
+```
+
+Expected: `skill` help lists `list`, `search`, `install`, `approve`, `deny`, `uninstall`.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 cd /home/racterub/github/gobrrr
-git add -A daemon/
-git commit -m "feat(skill): add install/approve/deny/uninstall/search CLI + daemon routes"
+git add daemon/internal/config/config.go daemon/internal/daemon/daemon.go daemon/internal/daemon/skill_routes.go daemon/internal/client/skill.go daemon/cmd/gobrrr/main.go
+git commit -m "feat(skill): add install/approve/deny/uninstall/search daemon routes + CLI"
 ```
 
 ---
