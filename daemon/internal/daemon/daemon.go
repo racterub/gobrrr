@@ -23,6 +23,7 @@ import (
 	"github.com/racterub/gobrrr/internal/scheduler"
 	"github.com/racterub/gobrrr/internal/security"
 	"github.com/racterub/gobrrr/internal/session"
+	"github.com/racterub/gobrrr/internal/skills"
 	"github.com/racterub/gobrrr/internal/telegram"
 )
 
@@ -65,7 +66,17 @@ func New(cfg *config.Config, socket string) *Daemon {
 	spawnInterval := time.Duration(cfg.SpawnIntervalSec) * time.Second
 	memDir := filepath.Join(gobrrDir, "memory")
 	ms := memory.NewStore(memDir)
-	wp := NewWorkerPool(q, cfg, cfg.MaxWorkers, spawnInterval, gobrrDir, ms)
+
+	skillsRoot := filepath.Join(gobrrDir, "skills")
+	if err := skills.InstallSystemSkills(skillsRoot); err != nil {
+		log.Printf("daemon: install system skills: %v", err)
+	}
+	skillReg := skills.NewRegistry(skillsRoot)
+	if err := skillReg.Refresh(); err != nil {
+		log.Printf("daemon: refresh skills: %v", err)
+	}
+
+	wp := NewWorkerPool(q, cfg, cfg.MaxWorkers, spawnInterval, gobrrDir, ms, skillReg)
 
 	// Initialize AccountManager if the google directory exists and is accessible.
 	var acctMgr *google.AccountManager

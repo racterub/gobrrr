@@ -17,6 +17,7 @@ import (
 	"github.com/racterub/gobrrr/internal/identity"
 	"github.com/racterub/gobrrr/internal/memory"
 	"github.com/racterub/gobrrr/internal/security"
+	"github.com/racterub/gobrrr/internal/skills"
 )
 
 // ErrTimeout is returned by runWorker when the worker process exceeds its timeout.
@@ -139,6 +140,7 @@ type WorkerPool struct {
 	buildCommand  func(task *Task) *WorkerConfig
 	warmWorkers   []*WarmWorker
 	warmCommand   string // override for tests, empty = "claude"
+	skillReg      *skills.Registry
 	// onResult is called after a task completes or fails. It is optional.
 	onResult func(task *Task, result string)
 }
@@ -149,7 +151,7 @@ type WorkerPool struct {
 // cfg provides the workspace path used as the worker CWD. The workspace
 // directory is created if missing so worker spawns never fail on a stale
 // config pointing at a non-existent path.
-func NewWorkerPool(queue *Queue, cfg *config.Config, maxWorkers int, spawnInterval time.Duration, gobrrDir string, ms *memory.Store) *WorkerPool {
+func NewWorkerPool(queue *Queue, cfg *config.Config, maxWorkers int, spawnInterval time.Duration, gobrrDir string, ms *memory.Store, skillReg *skills.Registry) *WorkerPool {
 	if cfg != nil && cfg.WorkspacePath != "" {
 		_ = os.MkdirAll(cfg.WorkspacePath, 0o700)
 	}
@@ -160,6 +162,7 @@ func NewWorkerPool(queue *Queue, cfg *config.Config, maxWorkers int, spawnInterv
 		cfg:           cfg,
 		gobrrDir:      gobrrDir,
 		memStore:      ms,
+		skillReg:      skillReg,
 	}
 	wp.buildCommand = wp.defaultBuildCommand
 	return wp
@@ -211,26 +214,35 @@ func (wp *WorkerPool) defaultBuildCommand(task *Task) *WorkerConfig {
 	}
 }
 
-// buildFullPrompt loads identity and relevant memories and returns the full
-// prompt to pass to claude. On any error it falls back to the raw task prompt.
+// buildFullPrompt loads identity + memories + skills and returns the full
+// prompt to pass to claude. On identity-load error it falls back to the raw
+// task prompt (still with skills block prepended if available).
 func (wp *WorkerPool) buildFullPrompt(taskPrompt string) string {
 	ident, err := identity.Load(wp.gobrrDir)
-	if err != nil {
-		return taskPrompt
-	}
-
-	var memContents []string
-	if wp.memStore != nil {
-		all, err := wp.memStore.List(0)
-		if err == nil && len(all) > 0 {
-			relevant := memory.MatchRelevant(all, taskPrompt, 10)
-			for _, e := range relevant {
-				memContents = append(memContents, e.Content)
+	base := taskPrompt
+	if err == nil {
+		var memContents []string
+		if wp.memStore != nil {
+			all, err := wp.memStore.List(0)
+			if err == nil && len(all) > 0 {
+				relevant := memory.MatchRelevant(all, taskPrompt, 10)
+				for _, e := range relevant {
+					memContents = append(memContents, e.Content)
+				}
 			}
 		}
+		base = identity.BuildPrompt(ident, memContents, taskPrompt)
 	}
 
-	return identity.BuildPrompt(ident, memContents, taskPrompt)
+	if wp.skillReg == nil {
+		return base
+	}
+	home, _ := os.UserHomeDir()
+	block := skills.BuildPromptBlock(wp.skillReg.List(), home)
+	if block == "" {
+		return base
+	}
+	return block + "\n\n" + base
 }
 
 // StartWarm pre-spawns warm workers. Safe to call concurrently with Run().
