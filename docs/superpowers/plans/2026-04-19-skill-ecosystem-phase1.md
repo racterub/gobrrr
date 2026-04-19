@@ -2227,43 +2227,97 @@ git commit -m "feat(clawhub): add Go HTTP client for V1 search and bundle fetch"
 **Files:**
 - Create: `daemon/internal/clawhub/installer.go`
 - Create: `daemon/internal/clawhub/installer_test.go`
+- Modify: `daemon/internal/clawhub/types.go` (add `InstallRequest`, `ProposedCommand`)
+- Modify: `daemon/internal/skills/types.go` (add `FMInstallRecipe`, add `Install` field to `FMOpenClaw`)
 
-**Responsibility:** Given a fetched `SkillPackage`, unpack the tarball to a staging dir, parse frontmatter, detect missing binaries, compose an `InstallRequest`, and persist it to `<skillsRoot>/_requests/<req-id>.json`. Returns the request-id.
+**Responsibility:** Given a fetched `SkillPackage` (ZIP bytes + sha256), unpack the bundle to a staging dir, parse frontmatter, detect missing binaries, compose an `InstallRequest`, and persist it to `<skillsRoot>/_requests/<req-id>.json`. Returns the request-id.
 
-- [ ] **Step 1: Extend types.go**
+> **Tarball → Zip note:** Task 11 confirmed ClawHub serves `application/zip`, not tar.gz. Task 12 named the raw bytes `SkillPackage.BundleBytes` and removed the `TarballURL` field. This task uses `archive/zip` for extraction. The `SourceURL` on `InstallRequest` is reconstructed from the registry base + the download query, not stored on `SkillPackage` — the installer takes a `registryBaseURL` parameter for this.
 
-Append to `daemon/internal/clawhub/types.go`:
+- [ ] **Step 1: Extend `daemon/internal/clawhub/types.go`**
+
+The existing file has no imports. Replace its header (the `package clawhub` line and the `DefaultBaseURL` constant must stay) so the file imports `time` and `skills`, then append the new types. The final file should look like:
 
 ```go
-import (
-    "time"
+// Package clawhub is a Go client for the ClawHub skill registry.
+//
+// API reference: docs/superpowers/notes/2026-04-19-clawhub-api.md
+// Default base URL: https://clawhub.ai
+package clawhub
 
-    "github.com/racterub/gobrrr/internal/skills"
+import (
+	"time"
+
+	"github.com/racterub/gobrrr/internal/skills"
 )
 
+// DefaultBaseURL is the canonical ClawHub registry.
+// clawhub.com 307-redirects here; the ClawHub CLI hardcodes this value.
+const DefaultBaseURL = "https://clawhub.ai"
+
+// (keep the existing SkillSummary, searchResponse, skillMetadata,
+// versionDetail, SkillPackage type declarations exactly as they are)
+// ...
+
+// InstallRequest is the pending-install record written to disk for user
+// approval. A human-in-the-loop Telegram confirmation consumes this; the
+// downstream commit step reads it back to execute the install.
 type InstallRequest struct {
-    RequestID        string             `json:"request_id"`
-    Slug             string             `json:"slug"`
-    Version          string             `json:"version"`
-    SourceURL        string             `json:"source_url"`
-    SHA256           string             `json:"sha256"`
-    StagingDir       string             `json:"staging_dir"`
-    Frontmatter      skills.Frontmatter `json:"frontmatter"`
-    MissingBins      []string           `json:"missing_bins"`
-    ProposedCommands []ProposedCommand  `json:"proposed_commands"`
-    CreatedAt        time.Time          `json:"created_at"`
-    ExpiresAt        time.Time          `json:"expires_at"`
+	RequestID        string             `json:"request_id"`
+	Slug             string             `json:"slug"`
+	Version          string             `json:"version"`
+	SourceURL        string             `json:"source_url"`
+	SHA256           string             `json:"sha256"`
+	StagingDir       string             `json:"staging_dir"`
+	Frontmatter      skills.Frontmatter `json:"frontmatter"`
+	MissingBins      []string           `json:"missing_bins"`
+	ProposedCommands []ProposedCommand  `json:"proposed_commands"`
+	CreatedAt        time.Time          `json:"created_at"`
+	ExpiresAt        time.Time          `json:"expires_at"`
 }
 
+// ProposedCommand is one "install this missing binary with this command"
+// suggestion attached to an InstallRequest. Exact command strings are
+// shown to the user verbatim for approval.
 type ProposedCommand struct {
-    RecipeID string `json:"recipe_id"`
-    Kind     string `json:"kind"` // brew|apt|npm|go|uv
-    Command  string `json:"command"`
-    Bins     []string `json:"bins"`
+	RecipeID string   `json:"recipe_id"`
+	Kind     string   `json:"kind"` // brew|apt|apt-get|dnf|npm|go|uv
+	Command  string   `json:"command"`
+	Bins     []string `json:"bins"`
 }
 ```
 
-- [ ] **Step 2: Write failing test**
+- [ ] **Step 2: Extend `daemon/internal/skills/types.go`**
+
+Add a new `FMInstallRecipe` type and add an `Install` field to the existing `FMOpenClaw` struct:
+
+```go
+// FMInstallRecipe describes one way to install a missing binary on a host.
+// A skill can list multiple recipes (e.g. brew + apt + dnf); the installer
+// picks at most one per missing binary based on the host's package manager.
+type FMInstallRecipe struct {
+	ID      string   `yaml:"id"`
+	Kind    string   `yaml:"kind"`
+	Formula string   `yaml:"formula,omitempty"`
+	Package string   `yaml:"package,omitempty"`
+	Module  string   `yaml:"module,omitempty"`
+	URL     string   `yaml:"url,omitempty"`
+	Bins    []string `yaml:"bins,omitempty"`
+}
+```
+
+Modify the existing `FMOpenClaw` struct to add the `Install` field (keep `Emoji`, `Homepage`, and `Requires` as they are):
+
+```go
+type FMOpenClaw struct {
+	Emoji    string            `yaml:"emoji,omitempty"`
+	Homepage string            `yaml:"homepage,omitempty"`
+	Requires FMRequires        `yaml:"requires"`
+	Install  []FMInstallRecipe `yaml:"install,omitempty"`
+}
+```
+
+- [ ] **Step 3: Write failing tests**
 
 Create `daemon/internal/clawhub/installer_test.go`:
 
@@ -2271,23 +2325,21 @@ Create `daemon/internal/clawhub/installer_test.go`:
 package clawhub
 
 import (
-    "archive/tar"
-    "bytes"
-    "compress/gzip"
-    "encoding/json"
-    "os"
-    "path/filepath"
-    "testing"
+	"archive/zip"
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
 
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestInstaller_StagesAndWritesRequest(t *testing.T) {
-    skillsRoot := t.TempDir()
+	skillsRoot := t.TempDir()
 
-    // Build a fake tarball with SKILL.md.
-    skillMD := []byte(`---
+	skillMD := []byte(`---
 name: github
 description: GitHub ops
 metadata:
@@ -2306,356 +2358,514 @@ metadata:
         kind: apt
         package: gh-cli
         bins: [gh]
+      - id: gh-brew
+        kind: brew
+        formula: gh
+        bins: [gh]
 ---
 
 body
 `)
-    tarball := buildTarball(t, map[string][]byte{"SKILL.md": skillMD})
-    pkg := &SkillPackage{
-        Slug: "github", Version: "1.4.2",
-        SHA256: "abc123", TarballBytes: tarball,
-    }
+	bundle := buildZip(t, map[string][]byte{"SKILL.md": skillMD})
+	pkg := &SkillPackage{
+		Slug: "github", Version: "1.4.2",
+		SHA256: "abc123", BundleBytes: bundle,
+	}
 
-    inst := NewInstaller(skillsRoot, func(bin string) bool {
-        // Simulate gh not on PATH.
-        return bin != "gh"
-    })
-    reqID, err := inst.Stage(pkg)
-    require.NoError(t, err)
-    require.NotEmpty(t, reqID)
+	inst := NewInstaller(skillsRoot, "https://clawhub.ai", func(bin string) bool {
+		return bin != "gh" // gh missing from PATH
+	})
+	reqID, err := inst.Stage(pkg)
+	require.NoError(t, err)
+	require.NotEmpty(t, reqID)
 
-    // Request persisted.
-    data, err := os.ReadFile(filepath.Join(skillsRoot, "_requests", reqID+".json"))
-    require.NoError(t, err)
-    var req InstallRequest
-    require.NoError(t, json.Unmarshal(data, &req))
-    assert.Equal(t, "github", req.Slug)
-    assert.Contains(t, req.MissingBins, "gh")
-    require.Len(t, req.ProposedCommands, 1)
-    assert.Equal(t, "apt", req.ProposedCommands[0].Kind)
-    assert.Contains(t, req.ProposedCommands[0].Command, "gh-cli")
+	// Request persisted.
+	data, err := os.ReadFile(filepath.Join(skillsRoot, "_requests", reqID+".json"))
+	require.NoError(t, err)
+	var req InstallRequest
+	require.NoError(t, json.Unmarshal(data, &req))
+	assert.Equal(t, "github", req.Slug)
+	assert.Equal(t, "1.4.2", req.Version)
+	assert.Equal(t, "abc123", req.SHA256)
+	assert.Contains(t, req.SourceURL, "clawhub.ai")
+	assert.Contains(t, req.SourceURL, "slug=github")
+	assert.Contains(t, req.SourceURL, "version=1.4.2")
+	assert.Contains(t, req.MissingBins, "gh")
+	require.NotEmpty(t, req.ProposedCommands)
+	// At least one proposal supplies gh.
+	found := false
+	for _, pc := range req.ProposedCommands {
+		for _, b := range pc.Bins {
+			if b == "gh" {
+				found = true
+			}
+		}
+	}
+	assert.True(t, found, "a proposed command must supply the missing gh binary")
 
-    // Staging dir contains SKILL.md.
-    assert.FileExists(t, filepath.Join(req.StagingDir, "SKILL.md"))
+	// Staging dir contains SKILL.md.
+	assert.FileExists(t, filepath.Join(req.StagingDir, "SKILL.md"))
+	assert.False(t, req.ExpiresAt.IsZero())
+	assert.True(t, req.ExpiresAt.After(req.CreatedAt))
 }
 
-func buildTarball(t *testing.T, files map[string][]byte) []byte {
-    t.Helper()
-    var buf bytes.Buffer
-    gz := gzip.NewWriter(&buf)
-    tw := tar.NewWriter(gz)
-    for name, data := range files {
-        require.NoError(t, tw.WriteHeader(&tar.Header{
-            Name: name, Mode: 0600, Size: int64(len(data)),
-        }))
-        _, err := tw.Write(data)
-        require.NoError(t, err)
-    }
-    require.NoError(t, tw.Close())
-    require.NoError(t, gz.Close())
-    return buf.Bytes()
+func TestInstaller_NoMissingBinsYieldsNoProposals(t *testing.T) {
+	skillsRoot := t.TempDir()
+	skillMD := []byte(`---
+name: github
+description: GitHub ops
+metadata:
+  gobrrr: { type: clawhub }
+  openclaw:
+    requires:
+      bins: [gh]
+      tool_permissions:
+        read: ["Bash(gh issue list:*)"]
+---
+body
+`)
+	pkg := &SkillPackage{Slug: "github", Version: "1.4.2", BundleBytes: buildZip(t, map[string][]byte{"SKILL.md": skillMD})}
+	// Everything on PATH.
+	inst := NewInstaller(skillsRoot, "", func(string) bool { return true })
+	reqID, err := inst.Stage(pkg)
+	require.NoError(t, err)
+
+	data, _ := os.ReadFile(filepath.Join(skillsRoot, "_requests", reqID+".json"))
+	var req InstallRequest
+	require.NoError(t, json.Unmarshal(data, &req))
+	assert.Empty(t, req.MissingBins)
+	assert.Empty(t, req.ProposedCommands)
+}
+
+func TestInstaller_RejectsZipSlipEntries(t *testing.T) {
+	skillsRoot := t.TempDir()
+	// Build a zip whose entry name walks up out of dst. A naive implementation
+	// would write to skillsRoot/../evil.
+	bundle := buildZipRaw(t, []zipEntry{
+		{Name: "SKILL.md", Data: []byte("---\nname: x\ndescription: x\nmetadata:\n  gobrrr: {type: clawhub}\n  openclaw: {requires: {tool_permissions: {}}}\n---\nbody")},
+		{Name: "../evil.txt", Data: []byte("pwned")},
+	})
+	pkg := &SkillPackage{Slug: "x", Version: "0.0.1", BundleBytes: bundle}
+	inst := NewInstaller(skillsRoot, "", func(string) bool { return true })
+	_, err := inst.Stage(pkg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "escapes")
+	// The attempted evil file must not exist anywhere outside the skillsRoot.
+	_, statErr := os.Stat(filepath.Join(filepath.Dir(skillsRoot), "evil.txt"))
+	assert.True(t, os.IsNotExist(statErr), "zip slip must not write outside destination")
+}
+
+func TestInstaller_MissingSKILLMD(t *testing.T) {
+	skillsRoot := t.TempDir()
+	bundle := buildZip(t, map[string][]byte{"README.md": []byte("no skill here")})
+	pkg := &SkillPackage{Slug: "x", Version: "0.0.1", BundleBytes: bundle}
+	inst := NewInstaller(skillsRoot, "", func(string) bool { return true })
+	_, err := inst.Stage(pkg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SKILL.md")
+}
+
+// --- test helpers ---
+
+func buildZip(t *testing.T, files map[string][]byte) []byte {
+	t.Helper()
+	entries := make([]zipEntry, 0, len(files))
+	for name, data := range files {
+		entries = append(entries, zipEntry{Name: name, Data: data})
+	}
+	return buildZipRaw(t, entries)
+}
+
+type zipEntry struct {
+	Name string
+	Data []byte
+}
+
+func buildZipRaw(t *testing.T, entries []zipEntry) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, e := range entries {
+		w, err := zw.Create(e.Name)
+		require.NoError(t, err)
+		_, err = w.Write(e.Data)
+		require.NoError(t, err)
+	}
+	require.NoError(t, zw.Close())
+	return buf.Bytes()
 }
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [ ] **Step 4: Run to verify failure**
 
 ```bash
 cd daemon && go test ./internal/clawhub/... -run TestInstaller -v
 ```
 
-Expected: FAIL.
+Expected: FAIL — `NewInstaller`, `Stage`, `InstallRequest`, `ProposedCommand` don't exist yet.
 
-- [ ] **Step 4a: Extend `skills.FMOpenClaw` with the install recipe list**
-
-Append to `daemon/internal/skills/types.go`:
-
-```go
-type FMInstallRecipe struct {
-    ID      string   `yaml:"id"`
-    Kind    string   `yaml:"kind"`
-    Formula string   `yaml:"formula,omitempty"`
-    Package string   `yaml:"package,omitempty"`
-    Module  string   `yaml:"module,omitempty"`
-    URL     string   `yaml:"url,omitempty"`
-    Bins    []string `yaml:"bins,omitempty"`
-}
-```
-
-And modify the existing `FMOpenClaw` struct in the same file to add an `Install` field:
-
-```go
-type FMOpenClaw struct {
-    Emoji    string            `yaml:"emoji,omitempty"`
-    Homepage string            `yaml:"homepage,omitempty"`
-    Requires FMRequires        `yaml:"requires"`
-    Install  []FMInstallRecipe `yaml:"install,omitempty"`
-}
-```
-
-- [ ] **Step 4b: Implement installer.go**
+- [ ] **Step 5: Create `daemon/internal/clawhub/installer.go`**
 
 ```go
 package clawhub
 
 import (
-    "archive/tar"
-    "bytes"
-    "compress/gzip"
-    "crypto/sha256"
-    "encoding/hex"
-    "encoding/json"
-    "fmt"
-    "io"
-    "os"
-    "path/filepath"
-    "time"
+	"archive/zip"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
-    "github.com/racterub/gobrrr/internal/skills"
+	"github.com/racterub/gobrrr/internal/skills"
 )
 
-// BinChecker reports whether a binary exists on PATH. Defaults to exec.LookPath
-// in production; tests inject a fake.
+// BinChecker reports whether a binary exists on PATH. Production callers
+// pass a wrapper around exec.LookPath; tests inject a fake.
 type BinChecker func(bin string) bool
 
+// requestTTL is how long an approval proposal stays valid. After this window
+// the staging dir and request file are safe to garbage-collect.
+const requestTTL = 24 * time.Hour
+
+// Installer stages ClawHub bundles to a pending-approval directory. It does
+// not commit the skill to the live registry — that is a separate step gated
+// on user approval.
 type Installer struct {
-    skillsRoot string
-    hasBin     BinChecker
+	skillsRoot      string
+	registryBaseURL string
+	hasBin          BinChecker
 }
 
-func NewInstaller(skillsRoot string, hasBin BinChecker) *Installer {
-    return &Installer{skillsRoot: skillsRoot, hasBin: hasBin}
+// NewInstaller returns an Installer. Empty registryBaseURL falls back to
+// DefaultBaseURL (used only for composing the SourceURL recorded in the
+// approval request — bytes are already in hand from a prior Fetch).
+func NewInstaller(skillsRoot, registryBaseURL string, hasBin BinChecker) *Installer {
+	if registryBaseURL == "" {
+		registryBaseURL = DefaultBaseURL
+	}
+	return &Installer{
+		skillsRoot:      skillsRoot,
+		registryBaseURL: strings.TrimRight(registryBaseURL, "/"),
+		hasBin:          hasBin,
+	}
 }
 
-// Stage unpacks the tarball into a staging dir under _requests/<id>/, parses
-// frontmatter, detects missing binaries, and writes _requests/<id>.json.
-// Returns the request-id (first 4 hex chars of sha256, collision-checked).
+// Stage unpacks the bundle into <skillsRoot>/_requests/<id>_staging/,
+// parses frontmatter, detects missing binaries, and writes
+// <skillsRoot>/_requests/<id>.json. Returns the request-id.
 func (in *Installer) Stage(pkg *SkillPackage) (string, error) {
-    reqID, err := in.newRequestID(pkg)
-    if err != nil {
-        return "", err
-    }
+	if pkg == nil {
+		return "", fmt.Errorf("clawhub: nil package")
+	}
+	reqID, err := in.newRequestID(pkg)
+	if err != nil {
+		return "", err
+	}
 
-    stagingDir := filepath.Join(in.skillsRoot, "_requests", reqID+"_staging")
-    if err := os.MkdirAll(stagingDir, 0700); err != nil {
-        return "", err
-    }
-    if err := extractTarball(pkg.TarballBytes, stagingDir); err != nil {
-        return "", err
-    }
+	stagingDir := filepath.Join(in.skillsRoot, "_requests", reqID+"_staging")
+	if err := os.MkdirAll(stagingDir, 0700); err != nil {
+		return "", err
+	}
+	if err := extractZip(pkg.BundleBytes, stagingDir); err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return "", err
+	}
 
-    skillMD, err := os.ReadFile(filepath.Join(stagingDir, "SKILL.md"))
-    if err != nil {
-        return "", fmt.Errorf("missing SKILL.md in tarball: %w", err)
-    }
-    fm, _, err := skills.ParseFrontmatter(skillMD)
-    if err != nil {
-        return "", fmt.Errorf("parse frontmatter: %w", err)
-    }
+	skillMD, err := os.ReadFile(filepath.Join(stagingDir, "SKILL.md"))
+	if err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return "", fmt.Errorf("missing SKILL.md in bundle: %w", err)
+	}
+	fm, _, err := skills.ParseFrontmatter(skillMD)
+	if err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return "", fmt.Errorf("parse frontmatter: %w", err)
+	}
 
-    // Detect missing binaries.
-    missing := []string{}
-    for _, bin := range fm.Metadata.OpenClaw.Requires.Bins {
-        if !in.hasBin(bin) {
-            missing = append(missing, bin)
-        }
-    }
+	missing := []string{}
+	for _, bin := range fm.Metadata.OpenClaw.Requires.Bins {
+		if !in.hasBin(bin) {
+			missing = append(missing, bin)
+		}
+	}
 
-    // Select one install recipe per missing binary based on host.
-    proposed := proposeCommands(fm, missing)
+	proposed := proposeCommands(fm, missing)
 
-    req := InstallRequest{
-        RequestID:        reqID,
-        Slug:             pkg.Slug,
-        Version:          pkg.Version,
-        SourceURL:        pkg.TarballURL,
-        SHA256:           pkg.SHA256,
-        StagingDir:       stagingDir,
-        Frontmatter:      *fm,
-        MissingBins:      missing,
-        ProposedCommands: proposed,
-        CreatedAt:        time.Now().UTC(),
-        ExpiresAt:        time.Now().UTC().Add(24 * time.Hour),
-    }
-    reqPath := filepath.Join(in.skillsRoot, "_requests", reqID+".json")
-    if err := os.MkdirAll(filepath.Dir(reqPath), 0700); err != nil {
-        return "", err
-    }
-    data, err := json.MarshalIndent(req, "", "  ")
-    if err != nil {
-        return "", err
-    }
-    if err := writeAtomic(reqPath, data, 0600); err != nil {
-        return "", err
-    }
-    return reqID, nil
+	now := time.Now().UTC()
+	req := InstallRequest{
+		RequestID:        reqID,
+		Slug:             pkg.Slug,
+		Version:          pkg.Version,
+		SourceURL:        in.composeSourceURL(pkg.Slug, pkg.Version),
+		SHA256:           pkg.SHA256,
+		StagingDir:       stagingDir,
+		Frontmatter:      *fm,
+		MissingBins:      missing,
+		ProposedCommands: proposed,
+		CreatedAt:        now,
+		ExpiresAt:        now.Add(requestTTL),
+	}
+	reqPath := filepath.Join(in.skillsRoot, "_requests", reqID+".json")
+	if err := os.MkdirAll(filepath.Dir(reqPath), 0700); err != nil {
+		return "", err
+	}
+	data, err := json.MarshalIndent(req, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := writeAtomic(reqPath, data, 0600); err != nil {
+		return "", err
+	}
+	return reqID, nil
 }
 
+func (in *Installer) composeSourceURL(slug, version string) string {
+	return in.registryBaseURL + "/api/v1/download?slug=" + url.QueryEscape(slug) + "&version=" + url.QueryEscape(version)
+}
+
+// newRequestID returns a short (4-hex-char) id derived from the package
+// identity + wall clock, retrying on directory collisions.
 func (in *Installer) newRequestID(pkg *SkillPackage) (string, error) {
-    // 4-char hex prefix of sha256 of slug@version+timestamp; retry on collision.
-    for i := 0; i < 10; i++ {
-        seed := fmt.Sprintf("%s@%s@%d@%d", pkg.Slug, pkg.Version, time.Now().UnixNano(), i)
-        h := sha256.Sum256([]byte(seed))
-        id := hex.EncodeToString(h[:])[:4]
-        if _, err := os.Stat(filepath.Join(in.skillsRoot, "_requests", id+".json")); os.IsNotExist(err) {
-            return id, nil
-        }
-    }
-    return "", fmt.Errorf("could not allocate unique request id")
+	for i := 0; i < 16; i++ {
+		seed := fmt.Sprintf("%s@%s@%d@%d", pkg.Slug, pkg.Version, time.Now().UnixNano(), i)
+		h := sha256.Sum256([]byte(seed))
+		id := hex.EncodeToString(h[:])[:4]
+		jsonPath := filepath.Join(in.skillsRoot, "_requests", id+".json")
+		stagePath := filepath.Join(in.skillsRoot, "_requests", id+"_staging")
+		_, jsonErr := os.Stat(jsonPath)
+		_, stageErr := os.Stat(stagePath)
+		if os.IsNotExist(jsonErr) && os.IsNotExist(stageErr) {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("could not allocate unique request id")
 }
 
-func extractTarball(data []byte, dst string) error {
-    gz, err := gzip.NewReader(bytes.NewReader(data))
-    if err != nil {
-        return err
-    }
-    defer gz.Close()
-    tr := tar.NewReader(gz)
-    for {
-        hdr, err := tr.Next()
-        if err == io.EOF {
-            return nil
-        }
-        if err != nil {
-            return err
-        }
-        target := filepath.Join(dst, filepath.Clean("/"+hdr.Name))
-        switch hdr.Typeflag {
-        case tar.TypeDir:
-            if err := os.MkdirAll(target, 0700); err != nil {
-                return err
-            }
-        case tar.TypeReg:
-            if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
-                return err
-            }
-            f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-            if err != nil {
-                return err
-            }
-            if _, err := io.Copy(f, tr); err != nil {
-                f.Close()
-                return err
-            }
-            f.Close()
-        }
-    }
+// extractZip writes every file entry in data under dst. Directory entries
+// are created lazily. Symlinks and other non-regular files are skipped.
+// Any entry whose resolved path escapes dst returns an error.
+func extractZip(data []byte, dst string) error {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return fmt.Errorf("zip reader: %w", err)
+	}
+	absDst, err := filepath.Abs(dst)
+	if err != nil {
+		return err
+	}
+	absDst = filepath.Clean(absDst)
+
+	for _, f := range zr.File {
+		if f.Mode().IsDir() {
+			continue
+		}
+		if !f.Mode().IsRegular() {
+			continue // skip symlinks and other special entries
+		}
+		// Resolve + verify inside dst.
+		target := filepath.Clean(filepath.Join(absDst, f.Name))
+		rel, err := filepath.Rel(absDst, target)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return fmt.Errorf("zip: entry %q escapes destination", f.Name)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+			return err
+		}
+		if err := writeZipFile(f, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeZipFile(f *zip.File, target string) error {
+	rc, err := f.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, rc)
+	return err
 }
 
 // proposeCommands picks at most one recipe per missing binary, preferring
 // the host's native package manager. Detection is deliberately simple; users
 // see the exact command in the approval card and can decline.
 func proposeCommands(fm *skills.Frontmatter, missingBins []string) []ProposedCommand {
-    if len(missingBins) == 0 {
-        return nil
-    }
-    preferred := detectPackageManager()
-    var sudoPrefix string
-    if preferred == "apt" || preferred == "apt-get" || preferred == "dnf" {
-        sudoPrefix = "sudo "
-    }
-    missingSet := map[string]bool{}
-    for _, b := range missingBins {
-        missingSet[b] = true
-    }
+	if len(missingBins) == 0 {
+		return nil
+	}
+	preferred := detectPackageManager()
+	var sudoPrefix string
+	if preferred == "apt" || preferred == "apt-get" || preferred == "dnf" {
+		sudoPrefix = "sudo "
+	}
+	missingSet := map[string]bool{}
+	for _, b := range missingBins {
+		missingSet[b] = true
+	}
 
-    var out []ProposedCommand
-    for _, recipe := range fm.Metadata.OpenClaw.Install {
-        if !matchesRecipe(recipe.Kind, preferred) {
-            continue
-        }
-        if !suppliesMissing(recipe.Bins, missingSet) {
-            continue
-        }
-        var cmd string
-        switch recipe.Kind {
-        case "brew":
-            cmd = "brew install " + recipe.Formula
-        case "apt", "apt-get":
-            cmd = sudoPrefix + "apt install " + recipe.Package
-        case "dnf":
-            cmd = sudoPrefix + "dnf install " + recipe.Package
-        case "npm":
-            cmd = "npm install -g " + recipe.Package
-        case "go":
-            cmd = "go install " + recipe.Module
-        case "uv":
-            cmd = "uv tool install " + recipe.Package
-        default:
-            continue
-        }
-        out = append(out, ProposedCommand{
-            RecipeID: recipe.ID,
-            Kind:     recipe.Kind,
-            Command:  cmd,
-            Bins:     recipe.Bins,
-        })
-        for _, b := range recipe.Bins {
-            delete(missingSet, b)
-        }
-    }
-    return out
+	var out []ProposedCommand
+	for _, recipe := range fm.Metadata.OpenClaw.Install {
+		if !matchesRecipe(recipe.Kind, preferred) {
+			continue
+		}
+		if !suppliesMissing(recipe.Bins, missingSet) {
+			continue
+		}
+		var cmd string
+		switch recipe.Kind {
+		case "brew":
+			cmd = "brew install " + recipe.Formula
+		case "apt", "apt-get":
+			cmd = sudoPrefix + "apt install " + recipe.Package
+		case "dnf":
+			cmd = sudoPrefix + "dnf install " + recipe.Package
+		case "npm":
+			cmd = "npm install -g " + recipe.Package
+		case "go":
+			cmd = "go install " + recipe.Module
+		case "uv":
+			cmd = "uv tool install " + recipe.Package
+		default:
+			continue
+		}
+		out = append(out, ProposedCommand{
+			RecipeID: recipe.ID,
+			Kind:     recipe.Kind,
+			Command:  cmd,
+			Bins:     recipe.Bins,
+		})
+		for _, b := range recipe.Bins {
+			delete(missingSet, b)
+		}
+	}
+	// Fallback: if preferred had no matches, try any recipe that supplies a
+	// still-missing bin (so the user at least sees a possible install hint).
+	if len(missingSet) > 0 {
+		for _, recipe := range fm.Metadata.OpenClaw.Install {
+			if !suppliesMissing(recipe.Bins, missingSet) {
+				continue
+			}
+			// Skip if already proposed.
+			already := false
+			for _, pc := range out {
+				if pc.RecipeID == recipe.ID {
+					already = true
+					break
+				}
+			}
+			if already {
+				continue
+			}
+			var cmd string
+			switch recipe.Kind {
+			case "brew":
+				cmd = "brew install " + recipe.Formula
+			case "apt", "apt-get":
+				cmd = "apt install " + recipe.Package
+			case "dnf":
+				cmd = "dnf install " + recipe.Package
+			case "npm":
+				cmd = "npm install -g " + recipe.Package
+			case "go":
+				cmd = "go install " + recipe.Module
+			case "uv":
+				cmd = "uv tool install " + recipe.Package
+			default:
+				continue
+			}
+			out = append(out, ProposedCommand{
+				RecipeID: recipe.ID,
+				Kind:     recipe.Kind,
+				Command:  cmd,
+				Bins:     recipe.Bins,
+			})
+			for _, b := range recipe.Bins {
+				delete(missingSet, b)
+			}
+			if len(missingSet) == 0 {
+				break
+			}
+		}
+	}
+	return out
 }
 
 func matchesRecipe(kind, preferred string) bool {
-    if preferred == "" {
-        return true
-    }
-    if kind == preferred {
-        return true
-    }
-    if kind == "apt" && preferred == "apt-get" {
-        return true
-    }
-    if kind == "apt-get" && preferred == "apt" {
-        return true
-    }
-    return false
+	if preferred == "" {
+		return true
+	}
+	if kind == preferred {
+		return true
+	}
+	if kind == "apt" && preferred == "apt-get" {
+		return true
+	}
+	if kind == "apt-get" && preferred == "apt" {
+		return true
+	}
+	return false
 }
 
 func suppliesMissing(recipeBins []string, missing map[string]bool) bool {
-    for _, b := range recipeBins {
-        if missing[b] {
-            return true
-        }
-    }
-    return false
+	for _, b := range recipeBins {
+		if missing[b] {
+			return true
+		}
+	}
+	return false
 }
 
 func detectPackageManager() string {
-    for _, mgr := range []string{"brew", "apt", "apt-get", "dnf", "pacman"} {
-        if _, err := os.Stat("/usr/bin/" + mgr); err == nil {
-            return mgr
-        }
-        if _, err := os.Stat("/opt/homebrew/bin/" + mgr); err == nil {
-            return mgr
-        }
-    }
-    return ""
+	for _, mgr := range []string{"brew", "apt", "apt-get", "dnf", "pacman"} {
+		if _, err := os.Stat("/usr/bin/" + mgr); err == nil {
+			return mgr
+		}
+		if _, err := os.Stat("/opt/homebrew/bin/" + mgr); err == nil {
+			return mgr
+		}
+	}
+	return ""
 }
 
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
-    tmp := path + ".tmp"
-    if err := os.WriteFile(tmp, data, mode); err != nil {
-        return err
-    }
-    return os.Rename(tmp, path)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 ```
 
-- [ ] **Step 5: Run tests**
+- [ ] **Step 6: Run tests**
 
 ```bash
-cd daemon && go test ./internal/clawhub/... -v ./internal/skills/... -v
+cd daemon && go test ./internal/clawhub/... ./internal/skills/... -v
 ```
 
-Expected: PASS.
+Expected: all tests PASS (clawhub: 6 from Task 12 + 4 new = 10; skills: unchanged).
 
-- [ ] **Step 6: Commit**
+Also run `go vet ./internal/clawhub/... ./internal/skills/...` — must be clean.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 cd /home/racterub/github/gobrrr
 git add daemon/internal/clawhub/ daemon/internal/skills/types.go
-git commit -m "feat(clawhub): stage tarball and compose install approval request"
+git commit -m "feat(clawhub): stage ZIP bundle and compose install approval request"
 ```
 
 ---
