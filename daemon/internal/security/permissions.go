@@ -16,70 +16,55 @@ type settings struct {
 }
 
 // Generate creates a per-task settings.json for Claude Code workers.
-// workersDir is the base directory (e.g. ~/.gobrrr/workers/), taskID is the task ID.
-// Returns the path to the generated settings.json.
 //
-// Rules produced here are deliberately narrow (e.g. Bash(gobrrr *) rather
-// than Bash(*)). Claude Code's --permission-mode auto drops broad wildcards
-// on startup as a defense-in-depth measure, so narrow rules are not just
-// good hygiene — they're required for the allow-list to take effect.
-func Generate(workersDir string, taskID string, allowWrites bool) (string, error) {
+// skillRead is merged into allow unconditionally. skillWrite is merged only
+// when allowWrites is true. The baseline deny list is preserved in both modes.
+func Generate(workersDir string, taskID string, allowWrites bool, skillRead, skillWrite []string) (string, error) {
 	taskDir := filepath.Join(workersDir, taskID)
 	if err := os.MkdirAll(taskDir, 0700); err != nil {
 		return "", err
 	}
 
-	var s settings
+	baseAllow := []string{
+		"Bash(gobrrr *)",
+		"Bash(agent-browser *)",
+		"Read",
+		"Glob",
+		"Grep",
+	}
 	if allowWrites {
-		s = settings{
-			Permissions: permissions{
-				Allow: []string{
-					"Bash(gobrrr *)",
-					"Bash(agent-browser *)",
-					"Read",
-					"Glob",
-					"Grep",
-					"Write",
-					"Edit",
-				},
-				Deny: []string{
-					"Bash(curl *)",
-					"Bash(wget *)",
-					"Bash(claude *)",
-				},
-			},
-		}
-	} else {
-		s = settings{
-			Permissions: permissions{
-				Allow: []string{
-					"Bash(gobrrr *)",
-					"Bash(agent-browser *)",
-					"Read",
-					"Glob",
-					"Grep",
-				},
-				Deny: []string{
-					"Bash(curl *)",
-					"Bash(wget *)",
-					"Bash(claude *)",
-					"Write",
-					"Edit",
-				},
-			},
-		}
+		baseAllow = append(baseAllow, "Write", "Edit")
+	}
+	baseDeny := []string{
+		"Bash(curl *)",
+		"Bash(wget *)",
+		"Bash(claude *)",
+	}
+	if !allowWrites {
+		baseDeny = append(baseDeny, "Write", "Edit")
+	}
+
+	allow := append([]string{}, baseAllow...)
+	allow = append(allow, skillRead...)
+	if allowWrites {
+		allow = append(allow, skillWrite...)
+	}
+
+	s := settings{
+		Permissions: permissions{
+			Allow: allow,
+			Deny:  baseDeny,
+		},
 	}
 
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return "", err
 	}
-
 	settingsPath := filepath.Join(taskDir, "settings.json")
 	if err := os.WriteFile(settingsPath, data, 0600); err != nil {
 		return "", err
 	}
-
 	return settingsPath, nil
 }
 

@@ -192,9 +192,18 @@ func (wp *WorkerPool) defaultBuildCommand(task *Task) *WorkerConfig {
 		}
 	}
 
+	// Collect skill permissions from registry.
+	var readPerms, writePerms []string
+	if wp.skillReg != nil {
+		for _, sk := range wp.skillReg.List() {
+			readPerms = append(readPerms, sk.ReadPermissions...)
+			writePerms = append(writePerms, sk.WritePermissions...)
+		}
+	}
+
 	// Generate per-task settings.json for permission sandboxing.
 	workersDir := filepath.Join(wp.gobrrDir, "workers")
-	if settingsPath, err := security.Generate(workersDir, task.ID, task.AllowWrites); err == nil {
+	if settingsPath, err := security.Generate(workersDir, task.ID, task.AllowWrites, readPerms, writePerms); err == nil {
 		args = append(args, "--settings", settingsPath)
 	}
 
