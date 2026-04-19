@@ -1,3 +1,24 @@
+---
+name: dispatch
+description: Submit background tasks to the gobrrr daemon
+metadata:
+  gobrrr:
+    type: system
+  openclaw:
+    requires:
+      bins: [gobrrr]
+      tool_permissions:
+        read:
+          - "Bash(gobrrr list:*)"
+          - "Bash(gobrrr status:*)"
+          - "Bash(gobrrr logs:*)"
+        write:
+          - "Bash(gobrrr submit:*)"
+          - "Bash(gobrrr cancel:*)"
+          - "Bash(gobrrr approve:*)"
+          - "Bash(gobrrr deny:*)"
+---
+
 # Dispatch Skill
 
 ## When to Activate

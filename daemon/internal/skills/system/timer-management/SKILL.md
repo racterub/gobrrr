@@ -1,3 +1,23 @@
+---
+name: timer-management
+description: Scheduled task management (cron-like recurring dispatches)
+metadata:
+  gobrrr:
+    type: system
+  openclaw:
+    requires:
+      bins: [gobrrr]
+      tool_permissions:
+        read:
+          - "Bash(gobrrr schedule list:*)"
+          - "Bash(gobrrr schedule show:*)"
+        write:
+          - "Bash(gobrrr schedule add:*)"
+          - "Bash(gobrrr schedule delete:*)"
+          - "Bash(gobrrr schedule enable:*)"
+          - "Bash(gobrrr schedule disable:*)"
+---
+
 # Timer Management Skill
 
 ## When to Activate
