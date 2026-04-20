@@ -52,6 +52,8 @@ type Daemon struct {
 	clawhub       *clawhub.Client
 	installer     *clawhub.Installer
 	committer     *clawhub.Committer
+	approvals     *ApprovalDispatcher
+	approvalsRoot string
 	ctx           context.Context
 }
 
@@ -87,6 +89,10 @@ func New(cfg *config.Config, socket string) *Daemon {
 	ch := clawhub.NewClient(cfg.ClawHub.RegistryURL)
 	installer := clawhub.NewInstaller(skillsRoot, cfg.ClawHub.RegistryURL, binOnPath)
 	committer := clawhub.NewCommitter(skillsRoot, nil)
+
+	approvalsRoot := gobrrDir
+	approvalStore := NewApprovalStore(approvalsRoot)
+	approvals := NewApprovalDispatcher(approvalStore)
 
 	wp := NewWorkerPool(q, cfg, cfg.MaxWorkers, spawnInterval, gobrrDir, ms, skillReg)
 
@@ -143,6 +149,8 @@ func New(cfg *config.Config, socket string) *Daemon {
 		clawhub:       ch,
 		installer:     installer,
 		committer:     committer,
+		approvals:     approvals,
+		approvalsRoot: approvalsRoot,
 	}
 
 	// Session manager
@@ -214,6 +222,7 @@ func New(cfg *config.Config, socket string) *Daemon {
 
 	d.mux.HandleFunc("GET /skills", d.handleListSkills)
 	d.registerSkillRoutes()
+	d.mux.HandleFunc("POST /approvals/{id}", approvalDecisionHandler(d.approvals))
 
 	return d
 }
