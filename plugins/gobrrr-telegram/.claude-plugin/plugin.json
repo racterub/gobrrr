@@ -1,6 +1,6 @@
 {
   "name": "gobrrr-telegram",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "license": "Apache-2.0",
   "description": "Go drop-in replacement for the official telegram channel plugin",
   "keywords": ["telegram", "messaging", "channel", "mcp"]
