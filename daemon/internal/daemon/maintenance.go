@@ -103,6 +103,28 @@ func (d *Daemon) runMaintenance(ctx context.Context) {
 			PruneLogs(logsDir, d.cfg.LogRetentionDays)
 			d.queue.Prune(d.cfg.LogRetentionDays)
 			PruneExpiredInstallRequests(d.skillsRoot)
+			if err := PruneExpiredApprovals(d.approvals); err != nil {
+				log.Printf("maintenance: prune approvals: %v", err)
+			}
 		}
 	}
+}
+
+// PruneExpiredApprovals walks the dispatcher's pending approvals and, for each
+// expired entry, synthesizes a "deny" decision. This delegates cleanup to the
+// kind's handler (e.g. skill_install's deny handler removes the staged bundle)
+// while maintaining a single lifecycle code path.
+func PruneExpiredApprovals(d *ApprovalDispatcher) error {
+	pending, err := d.List()
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, req := range pending {
+		if req.ExpiresAt.IsZero() || req.ExpiresAt.After(now) {
+			continue
+		}
+		_ = d.Decide(req.ID, "deny")
+	}
+	return nil
 }

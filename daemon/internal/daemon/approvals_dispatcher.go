@@ -60,8 +60,10 @@ var (
 
 // Create persists a new approval and fires the onCreate callback. Returns the
 // stored request so the caller can log/echo the id.
+// A zero ttl defaults to 24 hours. Negative ttl values are accepted as-is,
+// which produces an ExpiresAt in the past (useful in tests to pre-expire).
 func (d *ApprovalDispatcher) Create(kind, title, body string, actions []string, payload any, ttl time.Duration) (*ApprovalRequest, error) {
-	if ttl <= 0 {
+	if ttl == 0 {
 		ttl = 24 * time.Hour
 	}
 	rawPayload, err := json.Marshal(payload)
