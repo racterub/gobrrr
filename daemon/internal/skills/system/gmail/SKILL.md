@@ -1,3 +1,21 @@
+---
+name: gmail
+description: Email read/send/reply via gobrrr CLI
+metadata:
+  gobrrr:
+    type: system
+  openclaw:
+    requires:
+      bins: [gobrrr]
+      tool_permissions:
+        read:
+          - "Bash(gobrrr gmail list:*)"
+          - "Bash(gobrrr gmail read:*)"
+        write:
+          - "Bash(gobrrr gmail send:*)"
+          - "Bash(gobrrr gmail reply:*)"
+---
+
 # Gmail Skill
 
 ## When to Activate

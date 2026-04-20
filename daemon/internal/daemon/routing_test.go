@@ -21,7 +21,7 @@ func newTestDaemon(t *testing.T, notifier *telegram.Notifier) *Daemon {
 	dir := t.TempDir()
 	queuePath := filepath.Join(dir, "queue.json")
 	q := NewQueue(queuePath)
-	wp := NewWorkerPool(q, &config.Config{WorkspacePath: dir}, 1, 0, dir, nil)
+	wp := NewWorkerPool(q, &config.Config{WorkspacePath: dir}, 1, 0, dir, nil, nil)
 	return &Daemon{
 		gobrrDir:   dir,
 		queue:      q,

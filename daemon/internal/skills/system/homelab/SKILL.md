@@ -1,3 +1,18 @@
+---
+name: homelab
+description: Homelab service queries (Proxmox VMs, service health)
+metadata:
+  gobrrr:
+    type: system
+  openclaw:
+    requires:
+      bins: [gobrrr]
+      tool_permissions:
+        read:
+          - "Bash(gobrrr homelab:*)"
+        write: []
+---
+
 # Homelab Skill
 
 ## When to Activate

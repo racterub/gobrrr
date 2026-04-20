@@ -1,3 +1,23 @@
+---
+name: calendar
+description: Google Calendar read/create/update via gobrrr CLI
+metadata:
+  gobrrr:
+    type: system
+  openclaw:
+    requires:
+      bins: [gobrrr]
+      tool_permissions:
+        read:
+          - "Bash(gobrrr gcal today:*)"
+          - "Bash(gobrrr gcal week:*)"
+          - "Bash(gobrrr gcal list:*)"
+        write:
+          - "Bash(gobrrr gcal create:*)"
+          - "Bash(gobrrr gcal update:*)"
+          - "Bash(gobrrr gcal delete:*)"
+---
+
 # Calendar Skill
 
 ## When to Activate

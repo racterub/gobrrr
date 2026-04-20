@@ -1,3 +1,22 @@
+---
+name: memory
+description: Persistent gobrrr memory store — search, add, list
+metadata:
+  gobrrr:
+    type: system
+  openclaw:
+    requires:
+      bins: [gobrrr]
+      tool_permissions:
+        read:
+          - "Bash(gobrrr memory list:*)"
+          - "Bash(gobrrr memory search:*)"
+          - "Bash(gobrrr memory get:*)"
+        write:
+          - "Bash(gobrrr memory add:*)"
+          - "Bash(gobrrr memory delete:*)"
+---
+
 # Memory Skill
 
 ## When to Save

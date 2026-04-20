@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/racterub/gobrrr/internal/config"
+	"github.com/racterub/gobrrr/internal/skills"
 )
 
 func TestWorkerCapturesOutput(t *testing.T) {
@@ -65,7 +66,7 @@ func TestWorkerPoolConcurrencyLimit(t *testing.T) {
 	q := NewQueue(queuePath)
 
 	// Use sleep long enough that the pool will be at max concurrency while we poll.
-	pool := NewWorkerPool(q, &config.Config{WorkspacePath: dir}, 2, 0, dir, nil)
+	pool := NewWorkerPool(q, &config.Config{WorkspacePath: dir}, 2, 0, dir, nil, nil)
 	pool.buildCommand = func(task *Task) *WorkerConfig {
 		return &WorkerConfig{
 			Command:    "sleep",
@@ -132,7 +133,7 @@ func TestWorkerPoolTaskResultStored(t *testing.T) {
 	queuePath := filepath.Join(dir, "queue.json")
 	q := NewQueue(queuePath)
 
-	pool := NewWorkerPool(q, &config.Config{WorkspacePath: dir}, 2, 0, dir, nil)
+	pool := NewWorkerPool(q, &config.Config{WorkspacePath: dir}, 2, 0, dir, nil, nil)
 	pool.buildCommand = func(task *Task) *WorkerConfig {
 		return &WorkerConfig{
 			Command:    "echo",
@@ -187,7 +188,7 @@ func TestDefaultBuildCommandUsesWorkspacePath(t *testing.T) {
 
 	qPath := filepath.Join(gobrrDir, "queue.json")
 	q := NewQueue(qPath)
-	pool := NewWorkerPool(q, &config.Config{WorkspacePath: workspace}, 1, 0, gobrrDir, nil)
+	pool := NewWorkerPool(q, &config.Config{WorkspacePath: workspace}, 1, 0, gobrrDir, nil, nil)
 
 	cfg := pool.defaultBuildCommand(&Task{ID: "t_1", Prompt: "hi", TimeoutSec: 5})
 	assert.Equal(t, workspace, cfg.WorkDir, "worker CWD should be the configured workspace path")
@@ -202,7 +203,7 @@ func TestNewWorkerPoolCreatesWorkspace(t *testing.T) {
 
 	qPath := filepath.Join(gobrrDir, "queue.json")
 	q := NewQueue(qPath)
-	_ = NewWorkerPool(q, &config.Config{WorkspacePath: workspace}, 1, 0, gobrrDir, nil)
+	_ = NewWorkerPool(q, &config.Config{WorkspacePath: workspace}, 1, 0, gobrrDir, nil, nil)
 
 	info, err := os.Stat(workspace)
 	require.NoError(t, err, "workspace directory should be created")
@@ -228,7 +229,7 @@ done
 	require.NoError(t, os.WriteFile(script, []byte(content), 0755))
 
 	cfg := &config.Config{WorkspacePath: dir, WarmWorkers: 1}
-	pool := NewWorkerPool(q, cfg, 2, 0, dir, nil)
+	pool := NewWorkerPool(q, cfg, 2, 0, dir, nil, nil)
 
 	// Override warm worker command for testing.
 	pool.warmCommand = script
@@ -268,7 +269,7 @@ func TestWorkerPoolWarmFallbackToCold(t *testing.T) {
 	q := NewQueue(queuePath)
 
 	cfg := &config.Config{WorkspacePath: dir, WarmWorkers: 0} // no warm workers
-	pool := NewWorkerPool(q, cfg, 2, 0, dir, nil)
+	pool := NewWorkerPool(q, cfg, 2, 0, dir, nil, nil)
 	pool.buildCommand = func(task *Task) *WorkerConfig {
 		return &WorkerConfig{
 			Command:    "echo",
@@ -313,7 +314,7 @@ func TestColdWorkerBuildCommandUsesConfiguredModelAndMode(t *testing.T) {
 			ColdWorker: config.ModelConfig{Model: "opus", PermissionMode: "auto"},
 		},
 	}
-	pool := NewWorkerPool(q, cfg, 1, 0, dir, nil)
+	pool := NewWorkerPool(q, cfg, 1, 0, dir, nil, nil)
 
 	task := &Task{ID: "t_test", Prompt: "hello", TimeoutSec: 10}
 	wc := pool.defaultBuildCommand(task)
@@ -328,7 +329,7 @@ func TestColdWorkerBuildCommandUsesConfiguredModelAndMode(t *testing.T) {
 func TestReserveWarmWorkerSkipsDisabled(t *testing.T) {
 	dir := t.TempDir()
 	q := NewQueue(filepath.Join(dir, "queue.json"))
-	pool := NewWorkerPool(q, &config.Config{}, 1, 0, dir, nil)
+	pool := NewWorkerPool(q, &config.Config{}, 1, 0, dir, nil, nil)
 
 	// Manually populate a single warm worker, mark it disabled.
 	ww := NewWarmWorker(0, dir, nil, nil)
@@ -349,7 +350,7 @@ func TestReserveWarmWorkerSkipsDisabled(t *testing.T) {
 func TestWarmStatusExcludesDisabledFromReady(t *testing.T) {
 	dir := t.TempDir()
 	q := NewQueue(filepath.Join(dir, "queue.json"))
-	pool := NewWorkerPool(q, &config.Config{}, 1, 0, dir, nil)
+	pool := NewWorkerPool(q, &config.Config{}, 1, 0, dir, nil, nil)
 
 	ready := NewWarmWorker(0, dir, nil, nil)
 	ready.ready = true
@@ -368,4 +369,27 @@ func TestWarmStatusExcludesDisabledFromReady(t *testing.T) {
 	assert.Equal(t, 1, readyCount, "ready must exclude disabled workers")
 	assert.Equal(t, 0, busy)
 	assert.Equal(t, 1, disabledCount, "disabled count must reflect the disabled slot")
+}
+
+func TestBuildFullPrompt_IncludesSkillsBlock(t *testing.T) {
+	root := t.TempDir()
+	// Seed a single skill.
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "gmail"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "gmail", "SKILL.md"),
+		[]byte("---\nname: gmail\ndescription: email\nmetadata:\n  gobrrr:\n    type: system\n---\n\nbody"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "gmail", "_meta.json"),
+		[]byte(`{"slug":"gmail","version":"system","installed_at":"2026-01-01T00:00:00Z","fingerprint":"sha256:x","approved_read_permissions":[],"approved_write_permissions":[]}`), 0600))
+
+	reg := skills.NewRegistry(root)
+	require.NoError(t, reg.Refresh())
+
+	wp := &WorkerPool{
+		gobrrDir: t.TempDir(), // no identity here
+		skillReg: reg,
+	}
+
+	got := wp.buildFullPrompt("do the thing")
+	assert.Contains(t, got, "<available_skills>")
+	assert.Contains(t, got, `name="gmail"`)
+	assert.Contains(t, got, "do the thing")
 }

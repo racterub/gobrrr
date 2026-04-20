@@ -10,12 +10,14 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/racterub/gobrrr/internal/clawhub"
 	"github.com/racterub/gobrrr/internal/config"
 	vault "github.com/racterub/gobrrr/internal/crypto"
 	"github.com/racterub/gobrrr/internal/google"
@@ -23,6 +25,7 @@ import (
 	"github.com/racterub/gobrrr/internal/scheduler"
 	"github.com/racterub/gobrrr/internal/security"
 	"github.com/racterub/gobrrr/internal/session"
+	"github.com/racterub/gobrrr/internal/skills"
 	"github.com/racterub/gobrrr/internal/telegram"
 )
 
@@ -44,6 +47,11 @@ type Daemon struct {
 	startTime     time.Time
 	session       *session.Manager
 	scheduler     *scheduler.Scheduler
+	skillReg      *skills.Registry
+	skillsRoot    string
+	clawhub       *clawhub.Client
+	installer     *clawhub.Installer
+	committer     *clawhub.Committer
 	ctx           context.Context
 }
 
@@ -65,7 +73,22 @@ func New(cfg *config.Config, socket string) *Daemon {
 	spawnInterval := time.Duration(cfg.SpawnIntervalSec) * time.Second
 	memDir := filepath.Join(gobrrDir, "memory")
 	ms := memory.NewStore(memDir)
-	wp := NewWorkerPool(q, cfg, cfg.MaxWorkers, spawnInterval, gobrrDir, ms)
+
+	skillsRoot := filepath.Join(gobrrDir, "skills")
+	if err := skills.InstallSystemSkills(skillsRoot); err != nil {
+		log.Printf("daemon: install system skills: %v", err)
+	}
+	skillReg := skills.NewRegistry(skillsRoot)
+	if err := skillReg.Refresh(); err != nil {
+		log.Printf("daemon: refresh skills: %v", err)
+	}
+
+	// ClawHub wiring. Empty URL falls back to clawhub.DefaultBaseURL.
+	ch := clawhub.NewClient(cfg.ClawHub.RegistryURL)
+	installer := clawhub.NewInstaller(skillsRoot, cfg.ClawHub.RegistryURL, binOnPath)
+	committer := clawhub.NewCommitter(skillsRoot, nil)
+
+	wp := NewWorkerPool(q, cfg, cfg.MaxWorkers, spawnInterval, gobrrDir, ms, skillReg)
 
 	// Initialize AccountManager if the google directory exists and is accessible.
 	var acctMgr *google.AccountManager
@@ -115,6 +138,11 @@ func New(cfg *config.Config, socket string) *Daemon {
 		heartbeat:     hb,
 		healthChecker: hc,
 		confirmGate:   security.NewGate(5 * time.Minute),
+		skillReg:      skillReg,
+		skillsRoot:    skillsRoot,
+		clawhub:       ch,
+		installer:     installer,
+		committer:     committer,
 	}
 
 	// Session manager
@@ -184,7 +212,20 @@ func New(cfg *config.Config, socket string) *Daemon {
 	d.mux.HandleFunc("GET /schedules", d.handleListSchedules)
 	d.mux.HandleFunc("DELETE /schedules/{name}", d.handleRemoveSchedule)
 
+	d.mux.HandleFunc("GET /skills", d.handleListSkills)
+	d.registerSkillRoutes()
+
 	return d
+}
+
+func (d *Daemon) handleListSkills(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if d.skillReg == nil {
+		_ = json.NewEncoder(w).Encode([]skills.Skill{})
+		return
+	}
+	list := d.skillReg.List()
+	_ = json.NewEncoder(w).Encode(list)
 }
 
 // Run starts the daemon and blocks until ctx is cancelled or a fatal error occurs.
@@ -1068,4 +1109,9 @@ func (d *Daemon) handleRemoveSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "removed"}) //nolint:errcheck
+}
+
+func binOnPath(bin string) bool {
+	_, err := exec.LookPath(bin)
+	return err == nil
 }

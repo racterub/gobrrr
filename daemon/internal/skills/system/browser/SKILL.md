@@ -1,3 +1,18 @@
+---
+name: browser
+description: Agent-driven headless browser for web content extraction
+metadata:
+  gobrrr:
+    type: system
+  openclaw:
+    requires:
+      bins: [agent-browser]
+      tool_permissions:
+        read:
+          - "Bash(agent-browser *)"
+        write: []
+---
+
 # Browser Skill
 
 ## When to Activate
