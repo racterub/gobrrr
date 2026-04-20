@@ -90,3 +90,41 @@ The `channel/index.ts` Bun MCP process consumed all available memory (31GB) on t
 
 **Start by:** Study ClaudeClaw's repo structure to understand how it packages itself as a Claude Code plugin — look at its `package.json`, plugin manifest, and how it registers skills like `/claudeclaw:start`. Then check Claude Code plugin marketplace docs for the packaging contract.
 
+## Unify write-action confirmations into the generic approval system — 2026-04-20
+
+**What:** Migrate `internal/security/Gate` (in-process write-action confirmation: `Request`/`Approve`/`Deny`/`Wait` with timed channels) onto the persistent approval system introduced by the skill-ecosystem Phase 2 work. After migration, write-action confirmations flow through the same `POST /approvals/<id>` endpoint, same `ApprovalRequestEvent` SSE stream, same inline-keyboard Telegram UX, and same persisted `~/.gobrrr/approvals/` directory as skill installs. The old `security.Gate` type is deleted.
+
+**Why:** Phase 2 (skill ecosystem) deliberately shaped the new approval primitives to be kind-tagged (`ApprovalRequestEvent.Kind`, `/approvals/<id>` payload with `kind`, telegram callback_data encoding kind) so a second kind could be added without API breakage. Write-action confirmations are that second kind, but we kept the old in-memory `security.Gate` intact during Phase 2 to bound blast radius. Until migration, there are two approval paths to maintain: the old blocking channel gate for writes, and the new persistent/async flow for skill installs. Unifying removes duplicate code, gives write-action confirmations the same inline-button UX as skill installs, and survives daemon restarts (today a daemon restart loses all pending write-action confirmations because `Gate` is memory-only).
+
+**Files / docs:**
+- `daemon/internal/security/confirm.go` — `Gate` type to be removed
+- `daemon/internal/security/` — callers of `Gate.Request`/`Wait` (worker code paths that trigger write-action confirmation)
+- `daemon/internal/daemon/` — Phase 2 approval dispatcher (whatever the unified `POST /approvals/<id>` handler is called after Phase 2 lands)
+- `daemon/internal/daemon/sse.go` — extend `ApprovalRequestEvent` to carry write-action-specific payload (original task prompt, tool name, tool args, etc.)
+- `plugins/gobrrr-relay/index.ts` — if the MCP notification for write-action approvals differs from skill installs, may need a new notification kind
+- `plugins/gobrrr-telegram/` — button handling already exists from Phase 2; verify write-action callback_data routes correctly
+- Reference: `docs/superpowers/specs/2026-04-19-skill-ecosystem-design.md` (Phase 2 section) for the generic approval abstraction shape
+
+**Constraints:**
+- No behavior change for the worker side: when a worker tries to run a write tool without approval, it must still block (effectively) until the decision arrives or the timeout elapses. If the new approval system is async-only, we need to bridge — either keep a thin in-process wait wrapper around the persistent store, or change the worker-side contract to fail-fast-and-resubmit like skill installs do.
+- Must not regress the existing security invariant: write actions never proceed without explicit user approval.
+- The existing `security.Gate` has a per-gate timeout set at construction. The persistent store uses a TTL. Either make them equivalent or explicitly pick one.
+- Atomic writes for any new JSON state; file permissions `0600`.
+
+**Acceptance criteria:**
+- [ ] `internal/security/confirm.go` is deleted (or `Gate` is removed from it).
+- [ ] Write-action confirmation requests appear in `~/.gobrrr/approvals/` (or wherever the unified store lives) with `kind: write_action`.
+- [ ] Write-action confirmations are deliverable via inline Telegram keyboard buttons (approve/deny), just like skill installs.
+- [ ] Existing tests for write-action confirmation pass against the new backend.
+- [ ] A daemon restart during a pending write-action confirmation does not lose the pending request — on restart the request is still visible and actionable.
+- [ ] No double-notification: a single write-action confirmation fires exactly one Telegram message and one SSE event.
+
+**Out of scope:**
+- Changing the set of tools that trigger write-action confirmation.
+- New UX for write-action approval beyond reusing the Phase 2 inline-keyboard flow.
+- Observability / audit-trail improvements beyond what Phase 2 provides.
+
+**Estimated effort:** medium — the mechanical migration is small (swap call sites from `Gate` to the unified API), but the blocking-vs-async contract mismatch is the real design question. Budget time for deciding whether workers block on the unified store, or whether write-action approval becomes fail-fast like skill installs.
+
+**Start by:** After Phase 2 of the skill ecosystem lands, read its final design doc and grep for every call to `security.Gate`. For each caller, decide whether it can tolerate a fail-fast-resubmit model (simpler) or whether it needs an in-process blocking wrapper around the persistent store (more invasive). Sketch the two options, pick one, then migrate one caller end-to-end as a proof before converting the rest.
+
