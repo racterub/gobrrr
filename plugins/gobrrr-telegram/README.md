@@ -27,5 +27,12 @@ and inbound Telegram messages never reach the conversation.
 ## State
 
 Uses the same `~/.claude/channels/telegram/` directory as the official plugin.
-The `/telegram:access` and `/telegram:configure` skills continue to work
-unchanged.
+
+Access management is provided by the bundled `/gobrrr-telegram:access` skill
+(see `skills/access/SKILL.md`) — no need to install the official `telegram`
+plugin. The skill mirrors `/telegram:access`: status, `pair <code>`,
+`deny <code>`, `allow <senderId>`, `remove <senderId>`, `policy <mode>`,
+`group add/rm`, `set <key> <value>`.
+
+If the daemon is launched with `TELEGRAM_ACCESS_MODE=static`, the skill
+warns that mutations only take effect on the next restart.
