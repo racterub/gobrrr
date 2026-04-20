@@ -81,22 +81,9 @@ func (w *Bot) handleUpdate(ctx context.Context, inner *tgbot.Bot, upd *models.Up
 }
 
 func (w *Bot) handlePairing(ctx context.Context, a *access.Access, chatID, userID string, msg *models.Message) {
-	// Reply matches existing pending code? Approve.
-	if ok, yes, code := permission.Match(msg.Text); ok {
-		if p, found := a.Pending[code]; found && p.SenderID == userID {
-			delete(a.Pending, code)
-			if yes {
-				a.AllowFrom = append(a.AllowFrom, chatID)
-				_ = w.store.Save(*a)
-				w.sendText(ctx, msg.Chat.ID, 0, "paired ✓")
-			} else {
-				_ = w.store.Save(*a)
-				w.sendText(ctx, msg.Chat.ID, 0, "pairing declined")
-			}
-			return
-		}
-	}
-	// Issue new code.
+	// Pairing approval is intentionally out-of-band: the operator runs
+	// `/telegram:access pair <code>` in their own terminal. Accepting
+	// `y <code>` from Telegram would let the requester approve themselves.
 	access.PruneExpired(a)
 	code := access.NewPairingCode()
 	now := time.Now()
@@ -112,8 +99,8 @@ func (w *Bot) handlePairing(ctx context.Context, a *access.Access, chatID, userI
 	}
 	w.sendText(ctx, msg.Chat.ID,
 		msg.ID,
-		fmt.Sprintf("pairing code: %s\nask the operator to reply `y %s` in this chat to approve, or `n %s` to decline. expires in %s.",
-			code, code, code, pairingTTL))
+		fmt.Sprintf("pairing code: %s\nask the operator to run `/telegram:access pair %s` in their terminal to approve. expires in %s.",
+			code, code, pairingTTL))
 }
 
 // reactParams is a tiny shim so the call site reads nicely; we build the
