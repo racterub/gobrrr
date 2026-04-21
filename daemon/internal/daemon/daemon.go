@@ -54,6 +54,7 @@ type Daemon struct {
 	committer     *clawhub.Committer
 	approvals     *ApprovalDispatcher
 	approvalsRoot string
+	approvalHub   *ApprovalHub
 	ctx           context.Context
 }
 
@@ -93,6 +94,15 @@ func New(cfg *config.Config, socket string) *Daemon {
 	approvalsRoot := gobrrDir
 	approvalStore := NewApprovalStore(approvalsRoot)
 	approvals := NewApprovalDispatcher(approvalStore)
+	approvalHub := NewApprovalHub()
+	approvals.SetCallbacks(
+		func(r *ApprovalRequest) {
+			approvalHub.Emit(ApprovalEvent{Type: ApprovalEventCreated, Request: r})
+		},
+		func(id, dec string) {
+			approvalHub.Emit(ApprovalEvent{Type: ApprovalEventRemoved, ID: id, Decision: dec})
+		},
+	)
 
 	wp := NewWorkerPool(q, cfg, cfg.MaxWorkers, spawnInterval, gobrrDir, ms, skillReg)
 
@@ -151,6 +161,7 @@ func New(cfg *config.Config, socket string) *Daemon {
 		committer:     committer,
 		approvals:     approvals,
 		approvalsRoot: approvalsRoot,
+		approvalHub:   approvalHub,
 	}
 
 	// Session manager
