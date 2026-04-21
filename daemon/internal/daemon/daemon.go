@@ -234,6 +234,7 @@ func New(cfg *config.Config, socket string) *Daemon {
 	d.mux.HandleFunc("GET /skills", d.handleListSkills)
 	d.registerSkillRoutes()
 	d.mux.HandleFunc("POST /approvals/{id}", approvalDecisionHandler(d.approvals))
+	d.mux.HandleFunc("GET /approvals/stream", approvalStreamHandler(d.approvals, d.approvalHub))
 
 	return d
 }

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"net/http"
@@ -57,4 +58,51 @@ func TestApprovalsRoute_UnknownID_404(t *testing.T) {
 	mux.ServeHTTP(w, r)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestApprovalsStream_Rehydrates_ThenStreams(t *testing.T) {
+	store := NewApprovalStore(t.TempDir())
+	hub := NewApprovalHub()
+	d := NewApprovalDispatcher(store)
+	d.Register("k", &fakeHandler{})
+	d.SetCallbacks(
+		func(r *ApprovalRequest) { hub.Emit(ApprovalEvent{Type: ApprovalEventCreated, Request: r}) },
+		func(id, dec string) {
+			hub.Emit(ApprovalEvent{Type: ApprovalEventRemoved, ID: id, Decision: dec})
+		},
+	)
+
+	// Preload: one approval that should be rehydrated on connect.
+	_, err := d.Create("k", "pre", "body", []string{"approve"}, nil, time.Hour)
+	require.NoError(t, err)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /approvals/stream", approvalStreamHandler(d, hub))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/approvals/stream")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	reader := bufio.NewReader(resp.Body)
+	// Drop the initial ": connected" comment.
+	_, _ = reader.ReadString('\n')
+	_, _ = reader.ReadString('\n')
+
+	// Rehydrated event.
+	line, err := reader.ReadString('\n')
+	require.NoError(t, err)
+	assert.Contains(t, line, `"type":"created"`)
+	assert.Contains(t, line, `"title":"pre"`)
+	_, _ = reader.ReadString('\n')
+
+	// Trigger a live event.
+	_, err = d.Create("k", "live", "body", []string{"approve"}, nil, time.Hour)
+	require.NoError(t, err)
+
+	line, err = reader.ReadString('\n')
+	require.NoError(t, err)
+	assert.Contains(t, line, `"title":"live"`)
 }
