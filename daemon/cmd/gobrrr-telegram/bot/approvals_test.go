@@ -109,3 +109,11 @@ func TestBot_CallbackQuery_FallsBackTo_Permission(t *testing.T) {
 	assert.False(t, handled)
 	assert.Equal(t, "", apCalled) // approval callback refused, so didn't "match"
 }
+
+func TestBot_CallbackQuery_ApPrefix_NilCallback_FallsThrough(t *testing.T) {
+	b := &Bot{permPending: map[string]*permEntry{}}
+	// onApprovalCallback is nil → dispatch should fall through to the
+	// permission path; "ap:..." doesn't match pa:/pd:, so unhandled.
+	handled, _ := b.dispatchCallback("ap:abcd:approve")
+	assert.False(t, handled)
+}
