@@ -19,28 +19,15 @@ import (
 // approval. Callback data is `ap:{id}:{action}` — kept short to fit Telegram's
 // 64-byte callback_data cap with plenty of headroom.
 func RenderApprovalCard(req *client.ApprovalRequest) (string, models.InlineKeyboardMarkup) {
-	body := req.Title
+	var b strings.Builder
+	b.WriteString(req.Title)
 	if req.Body != "" {
-		body += "\n\n" + req.Body
+		b.WriteString("\n\n")
+		b.WriteString(req.Body)
 	}
 
-	// For skill_install, surface slug/version/sha from the payload without
-	// importing the skill package (the bot is intentionally decoupled from
-	// daemon-side types).
 	if req.Kind == "skill_install" {
-		var p struct {
-			Slug    string `json:"slug"`
-			Version string `json:"version"`
-			SHA256  string `json:"sha256"`
-		}
-		if err := json.Unmarshal(req.Payload, &p); err == nil {
-			if p.Slug != "" {
-				body += fmt.Sprintf("\n\nSkill: %s@%s", p.Slug, p.Version)
-			}
-			if p.SHA256 != "" {
-				body += fmt.Sprintf("\nsha256: %s", p.SHA256)
-			}
-		}
+		renderSkillInstallBody(&b, req.Payload)
 	}
 
 	var row []models.InlineKeyboardButton
@@ -51,7 +38,95 @@ func RenderApprovalCard(req *client.ApprovalRequest) (string, models.InlineKeybo
 		})
 	}
 	kb := models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{row}}
-	return body, kb
+	return b.String(), kb
+}
+
+// skillInstallPayload mirrors the fields of clawhub.InstallRequest that the
+// card surfaces. Defined locally so the bot stays decoupled from daemon-side
+// types — extra fields on the wire are ignored silently.
+type skillInstallPayload struct {
+	Slug        string `json:"slug"`
+	Version     string `json:"version"`
+	SourceURL   string `json:"source_url"`
+	SHA256      string `json:"sha256"`
+	Frontmatter struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Metadata    struct {
+			OpenClaw struct {
+				Requires struct {
+					ToolPermissions struct {
+						Read  []string `json:"read"`
+						Write []string `json:"write"`
+					} `json:"tool_permissions"`
+				} `json:"requires"`
+			} `json:"openclaw"`
+		} `json:"metadata"`
+	} `json:"frontmatter"`
+	ProposedCommands []struct {
+		Command string `json:"command"`
+	} `json:"proposed_commands"`
+}
+
+func renderSkillInstallBody(b *strings.Builder, payload json.RawMessage) {
+	var p skillInstallPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return
+	}
+
+	name := p.Frontmatter.Name
+	if name == "" {
+		name = p.Slug
+	}
+	if name != "" {
+		b.WriteString("\n\n")
+		b.WriteString(name)
+		if p.Version != "" {
+			b.WriteString(" v")
+			b.WriteString(p.Version)
+		}
+	}
+	if desc := p.Frontmatter.Description; desc != "" {
+		b.WriteString("\n")
+		b.WriteString(desc)
+	}
+
+	if p.SourceURL != "" {
+		b.WriteString("\n\nSource: ")
+		b.WriteString(p.SourceURL)
+	}
+	if p.SHA256 != "" {
+		sha := p.SHA256
+		if len(sha) > 8 {
+			sha = sha[:8]
+		}
+		b.WriteString("\nsha256: ")
+		b.WriteString(sha)
+	}
+
+	if len(p.ProposedCommands) > 0 {
+		b.WriteString("\n\nBinaries to install:")
+		for _, c := range p.ProposedCommands {
+			if c.Command == "" {
+				continue
+			}
+			b.WriteString("\n  • ")
+			b.WriteString(c.Command)
+		}
+	}
+
+	tp := p.Frontmatter.Metadata.OpenClaw.Requires.ToolPermissions
+	if len(tp.Read) > 0 || len(tp.Write) > 0 {
+		b.WriteString("\n\nPermissions:")
+		if len(tp.Read) > 0 {
+			b.WriteString("\n  read:  ")
+			b.WriteString(strings.Join(tp.Read, ", "))
+		}
+		if len(tp.Write) > 0 {
+			b.WriteString("\n  write: ")
+			b.WriteString(strings.Join(tp.Write, ", "))
+		}
+	}
 }
 
 func buttonLabel(action string) string {
