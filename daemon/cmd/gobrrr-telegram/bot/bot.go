@@ -44,8 +44,8 @@ type Bot struct {
 	// the 5-letter code shown to the user. The real claude request_id is
 	// stored on the entry so we can relay the verdict back via the
 	// onPermissionReply callback.
-	permMu            sync.Mutex
-	permPending       map[string]*permEntry
+	permMu             sync.Mutex
+	permPending        map[string]*permEntry
 	onPermissionReply  func(requestID string, allow bool)
 	onApprovalCallback func(data string) (bool, string)
 }
