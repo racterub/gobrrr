@@ -162,11 +162,17 @@ func (s *ApprovalSubscriber) handleCreated(ctx context.Context, req *client.Appr
 		return
 	}
 	a, err := s.bot.store.Load()
-	if err != nil || a.OwnerChatID == "" {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gobrrr-telegram: approval %s: load access store: %v\n", req.ID, err)
+		return
+	}
+	if a.OwnerChatID == "" {
+		fmt.Fprintf(os.Stderr, "gobrrr-telegram: approval %s dropped: no owner_chat_id set — run the access skill to pair\n", req.ID)
 		return
 	}
 	ownerID, err := strconv.ParseInt(a.OwnerChatID, 10, 64)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "gobrrr-telegram: approval %s: owner_chat_id %q is not a valid int64: %v\n", req.ID, a.OwnerChatID, err)
 		return
 	}
 	body, kb := RenderApprovalCard(req)

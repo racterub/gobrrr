@@ -68,7 +68,11 @@ func PruneExpiredApprovals(d *ApprovalDispatcher) error {
 		if req.ExpiresAt.IsZero() || req.ExpiresAt.After(now) {
 			continue
 		}
-		_ = d.Decide(req.ID, "deny")
+		if err := d.Decide(req.ID, "deny"); err != nil {
+			log.Printf("maintenance: synthesize deny for expired approval %s (kind=%s): %v", req.ID, req.Kind, err)
+			continue
+		}
+		log.Printf("maintenance: denied expired approval %s (kind=%s, expired_at=%s)", req.ID, req.Kind, req.ExpiresAt.Format(time.RFC3339))
 	}
 	return nil
 }
