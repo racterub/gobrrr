@@ -15,6 +15,7 @@ import (
 	"github.com/racterub/gobrrr/cmd/gobrrr-telegram/access"
 	"github.com/racterub/gobrrr/cmd/gobrrr-telegram/bot"
 	"github.com/racterub/gobrrr/cmd/gobrrr-telegram/mcpserver"
+	"github.com/racterub/gobrrr/internal/client"
 )
 
 func main() {
@@ -59,6 +60,24 @@ func main() {
 	}
 	mcpSrv = mcpserver.New(b, store, stateDir)
 	b.SetOnPermissionReply(mcpSrv.SendPermissionDecision)
+
+	// Connect to the gobrrr daemon for approval routing. Defaults match the
+	// daemon's default socket path; override with GOBRRR_SOCKET_PATH.
+	sockPath := os.Getenv("GOBRRR_SOCKET_PATH")
+	if sockPath == "" {
+		home, _ := os.UserHomeDir()
+		sockPath = filepath.Join(home, ".gobrrr", "gobrrr.sock")
+	}
+	daemonClient := client.New(sockPath)
+	sub := bot.NewApprovalSubscriber(b, daemonClient)
+	b.SetOnApprovalCallback(sub.HandleApprovalCallback)
+
+	go func() {
+		defer recoverAndLog("approval subscriber")
+		if err := sub.Run(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "gobrrr-telegram: approval subscriber stopped: %v\n", err)
+		}
+	}()
 
 	// Bot long-poll in a goroutine; MCP stdio server blocks main.
 	go func() {
