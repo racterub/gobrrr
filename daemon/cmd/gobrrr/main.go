@@ -806,7 +806,11 @@ var skillApproveCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		skip, _ := cmd.Flags().GetBool("skip-binary")
-		if err := newClient().ApproveSkill(args[0], skip); err != nil {
+		decision := "approve"
+		if skip {
+			decision = "skip_binary"
+		}
+		if err := newClient().DecideApproval(args[0], decision); err != nil {
 			return err
 		}
 		fmt.Println("approved")
@@ -819,7 +823,7 @@ var skillDenyCmd = &cobra.Command{
 	Short: "Deny a staged skill install",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := newClient().DenySkill(args[0]); err != nil {
+		if err := newClient().DecideApproval(args[0], "deny"); err != nil {
 			return err
 		}
 		fmt.Println("denied")
@@ -883,6 +887,7 @@ func printApprovalCard(r *client.InstallResult) {
 	fmt.Printf("  To proceed:  gobrrr skill approve %s\n", r.RequestID)
 	fmt.Printf("  Skill only:  gobrrr skill approve %s --skip-binary\n", r.RequestID)
 	fmt.Printf("  Cancel:      gobrrr skill deny %s\n", r.RequestID)
+	fmt.Printf("  (Inline approval also available via Telegram once the bot is running.)\n")
 }
 
 func init() {

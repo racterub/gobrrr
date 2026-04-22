@@ -76,17 +76,6 @@ func (c *Client) InstallSkill(slug, version string) (*InstallResult, error) {
 	return &out, nil
 }
 
-// ApproveSkill finalizes a staged install. If skipBinary is true, binaries are not installed.
-func (c *Client) ApproveSkill(reqID string, skipBinary bool) error {
-	body, _ := json.Marshal(map[string]bool{"skip_binary": skipBinary})
-	return c.postSkillSimple("/skills/approve/"+reqID, body)
-}
-
-// DenySkill discards a staged install.
-func (c *Client) DenySkill(reqID string) error {
-	return c.postSkillSimple("/skills/deny/"+reqID, nil)
-}
-
 // UninstallSkill removes an installed skill from ~/.gobrrr/skills/<slug>.
 func (c *Client) UninstallSkill(slug string) error {
 	req, err := http.NewRequest(http.MethodDelete, c.baseURL+"/skills/"+url.PathEscape(slug), nil)
@@ -101,19 +90,6 @@ func (c *Client) UninstallSkill(slug string) error {
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("uninstall skill: %s: %s", resp.Status, string(b))
-	}
-	return nil
-}
-
-func (c *Client) postSkillSimple(path string, body []byte) error {
-	resp, err := c.httpClient.Post(c.baseURL+path, "application/json", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("%s: %s", resp.Status, string(b))
 	}
 	return nil
 }
