@@ -103,6 +103,7 @@ func New(cfg *config.Config, socket string) *Daemon {
 			approvalHub.Emit(ApprovalEvent{Type: ApprovalEventRemoved, ID: id, Decision: dec})
 		},
 	)
+	approvals.Register("skill_install", &skillInstallHandler{committer: committer})
 
 	wp := NewWorkerPool(q, cfg, cfg.MaxWorkers, spawnInterval, gobrrDir, ms, skillReg)
 

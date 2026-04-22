@@ -3,7 +3,6 @@ package clawhub
 import (
 	"archive/zip"
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,24 +51,21 @@ body
 	inst := NewInstaller(skillsRoot, "https://clawhub.ai", func(bin string) bool {
 		return bin != "gh" // gh missing from PATH
 	})
-	reqID, err := inst.Stage(pkg)
+	installReq, err := inst.Stage(pkg)
 	require.NoError(t, err)
-	require.NotEmpty(t, reqID)
+	require.NotNil(t, installReq)
+	require.NotEmpty(t, installReq.RequestID)
 
-	data, err := os.ReadFile(filepath.Join(skillsRoot, "_requests", reqID+".json"))
-	require.NoError(t, err)
-	var req InstallRequest
-	require.NoError(t, json.Unmarshal(data, &req))
-	assert.Equal(t, "github", req.Slug)
-	assert.Equal(t, "1.4.2", req.Version)
-	assert.Equal(t, "abc123", req.SHA256)
-	assert.Contains(t, req.SourceURL, "clawhub.ai")
-	assert.Contains(t, req.SourceURL, "slug=github")
-	assert.Contains(t, req.SourceURL, "version=1.4.2")
-	assert.Contains(t, req.MissingBins, "gh")
-	require.NotEmpty(t, req.ProposedCommands)
+	assert.Equal(t, "github", installReq.Slug)
+	assert.Equal(t, "1.4.2", installReq.Version)
+	assert.Equal(t, "abc123", installReq.SHA256)
+	assert.Contains(t, installReq.SourceURL, "clawhub.ai")
+	assert.Contains(t, installReq.SourceURL, "slug=github")
+	assert.Contains(t, installReq.SourceURL, "version=1.4.2")
+	assert.Contains(t, installReq.MissingBins, "gh")
+	require.NotEmpty(t, installReq.ProposedCommands)
 	found := false
-	for _, pc := range req.ProposedCommands {
+	for _, pc := range installReq.ProposedCommands {
 		for _, b := range pc.Bins {
 			if b == "gh" {
 				found = true
@@ -78,9 +74,9 @@ body
 	}
 	assert.True(t, found, "a proposed command must supply the missing gh binary")
 
-	assert.FileExists(t, filepath.Join(req.StagingDir, "SKILL.md"))
-	assert.False(t, req.ExpiresAt.IsZero())
-	assert.True(t, req.ExpiresAt.After(req.CreatedAt))
+	assert.FileExists(t, filepath.Join(installReq.StagingDir, "SKILL.md"))
+	assert.False(t, installReq.ExpiresAt.IsZero())
+	assert.True(t, installReq.ExpiresAt.After(installReq.CreatedAt))
 }
 
 func TestInstaller_NoMissingBinsYieldsNoProposals(t *testing.T) {
@@ -100,14 +96,11 @@ body
 `)
 	pkg := &SkillPackage{Slug: "github", Version: "1.4.2", BundleBytes: buildZip(t, map[string][]byte{"SKILL.md": skillMD})}
 	inst := NewInstaller(skillsRoot, "", func(string) bool { return true })
-	reqID, err := inst.Stage(pkg)
+	installReq, err := inst.Stage(pkg)
 	require.NoError(t, err)
-
-	data, _ := os.ReadFile(filepath.Join(skillsRoot, "_requests", reqID+".json"))
-	var req InstallRequest
-	require.NoError(t, json.Unmarshal(data, &req))
-	assert.Empty(t, req.MissingBins)
-	assert.Empty(t, req.ProposedCommands)
+	require.NotNil(t, installReq)
+	assert.Empty(t, installReq.MissingBins)
+	assert.Empty(t, installReq.ProposedCommands)
 }
 
 func TestInstaller_RejectsZipSlipEntries(t *testing.T) {

@@ -44,12 +44,8 @@ func TestCommit_SkipBinaryPath(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(req.StagingDir, "SKILL.md"),
 		[]byte("---\nname: noop\ndescription: does nothing\nmetadata:\n  gobrrr:\n    type: clawhub\n---\n\nbody"), 0600))
 
-	require.NoError(t, os.MkdirAll(filepath.Join(skillsRoot, "_requests"), 0700))
-	reqBytes, _ := json.MarshalIndent(req, "", "  ")
-	require.NoError(t, os.WriteFile(filepath.Join(skillsRoot, "_requests", "abcd.json"), reqBytes, 0600))
-
 	committer := NewCommitter(skillsRoot, fakeCmdRunner(nil))
-	err := committer.Commit("abcd", Decision{Approve: true, SkipBinary: true})
+	err := committer.Commit(*req, Decision{Approve: true, SkipBinary: true})
 	require.NoError(t, err)
 
 	// Skill now installed.
@@ -69,26 +65,22 @@ func TestCommit_SkipBinaryPath(t *testing.T) {
 	// Staging dir removed.
 	_, err = os.Stat(req.StagingDir)
 	assert.True(t, os.IsNotExist(err))
-
-	// Request file removed.
-	_, err = os.Stat(filepath.Join(skillsRoot, "_requests", "abcd.json"))
-	assert.True(t, os.IsNotExist(err))
 }
 
 func TestCommit_Deny_CleansStaging(t *testing.T) {
 	skillsRoot := t.TempDir()
 	stagingDir := filepath.Join(skillsRoot, "_requests", "abcd_staging")
 	require.NoError(t, os.MkdirAll(stagingDir, 0700))
-	reqPath := filepath.Join(skillsRoot, "_requests", "abcd.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(reqPath), 0700))
-	require.NoError(t, os.WriteFile(reqPath, []byte(`{"request_id":"abcd","staging_dir":"`+stagingDir+`"}`), 0600))
+
+	req := InstallRequest{
+		RequestID:  "abcd",
+		StagingDir: stagingDir,
+	}
 
 	committer := NewCommitter(skillsRoot, fakeCmdRunner(nil))
-	require.NoError(t, committer.Commit("abcd", Decision{Approve: false}))
+	require.NoError(t, committer.Commit(req, Decision{Approve: false}))
 
 	_, err := os.Stat(stagingDir)
-	assert.True(t, os.IsNotExist(err))
-	_, err = os.Stat(reqPath)
 	assert.True(t, os.IsNotExist(err))
 }
 
@@ -133,12 +125,8 @@ func TestCommit_ApproveRunsBinaryAndRecords(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(req.StagingDir, "SKILL.md"),
 		[]byte("---\nname: gh-tool\ndescription: github cli tool\nmetadata:\n  gobrrr:\n    type: clawhub\n---\n\nbody"), 0600))
 
-	require.NoError(t, os.MkdirAll(filepath.Join(skillsRoot, "_requests"), 0700))
-	reqBytes, _ := json.MarshalIndent(req, "", "  ")
-	require.NoError(t, os.WriteFile(filepath.Join(skillsRoot, "_requests", "req1.json"), reqBytes, 0600))
-
 	committer := NewCommitter(skillsRoot, fakeCmdRunner(&ran))
-	err := committer.Commit("req1", Decision{Approve: true, SkipBinary: false})
+	err := committer.Commit(*req, Decision{Approve: true, SkipBinary: false})
 	require.NoError(t, err)
 
 	// The runner was invoked with the proposed command.
@@ -165,10 +153,6 @@ func TestCommit_ApproveRunsBinaryAndRecords(t *testing.T) {
 
 	// Staging dir removed.
 	_, err = os.Stat(req.StagingDir)
-	assert.True(t, os.IsNotExist(err))
-
-	// Request file removed.
-	_, err = os.Stat(filepath.Join(skillsRoot, "_requests", "req1.json"))
 	assert.True(t, os.IsNotExist(err))
 
 	// Lockfile updated.
@@ -220,17 +204,13 @@ func TestCommit_CommandFailureReturnsError(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(req.StagingDir, "SKILL.md"),
 		[]byte("---\nname: broken-tool\ndescription: tool with failing install\nmetadata:\n  gobrrr:\n    type: clawhub\n---\n\nbody"), 0600))
 
-	require.NoError(t, os.MkdirAll(filepath.Join(skillsRoot, "_requests"), 0700))
-	reqBytes, _ := json.MarshalIndent(req, "", "  ")
-	require.NoError(t, os.WriteFile(filepath.Join(skillsRoot, "_requests", "req2.json"), reqBytes, 0600))
-
 	// Inject a failing command runner.
 	failingCmdRunner := func(cmd string) (*exec.Cmd, error) {
 		return exec.Command("false"), nil // exits with code 1
 	}
 
 	committer := NewCommitter(skillsRoot, failingCmdRunner)
-	err := committer.Commit("req2", Decision{Approve: true, SkipBinary: false})
+	err := committer.Commit(*req, Decision{Approve: true, SkipBinary: false})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "command")
 
@@ -241,10 +221,6 @@ func TestCommit_CommandFailureReturnsError(t *testing.T) {
 
 	// Staging dir still exists (preserved on failure).
 	_, err = os.Stat(req.StagingDir)
-	assert.NoError(t, err)
-
-	// Request file still exists (preserved on failure).
-	_, err = os.Stat(filepath.Join(skillsRoot, "_requests", "req2.json"))
 	assert.NoError(t, err)
 
 	// Lockfile NOT created on failure.

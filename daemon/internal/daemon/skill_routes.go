@@ -55,25 +55,29 @@ func (d *Daemon) handleSkillsInstall(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	reqID, err := d.installer.Stage(pkg)
+	installReq, err := d.installer.Stage(pkg)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	reqPath := filepath.Join(d.skillsRoot, "_requests", reqID+".json")
-	data, err := os.ReadFile(reqPath)
+	// Task 14 will kill this JSON write once /skills/approve and /skills/deny are retired.
+	reqPath := filepath.Join(d.skillsRoot, "_requests", installReq.RequestID+".json")
+	reqData, err := json.MarshalIndent(installReq, "", "  ")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	var req clawhub.InstallRequest
-	if err := json.Unmarshal(data, &req); err != nil {
+	if err := os.MkdirAll(filepath.Dir(reqPath), 0700); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(reqPath, reqData, 0600); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	writeSkillJSON(w, map[string]any{
-		"request_id": reqID,
-		"request":    req,
+		"request_id": installReq.RequestID,
+		"request":    installReq,
 	})
 }
 
@@ -85,10 +89,23 @@ func (d *Daemon) handleSkillsApprove(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body approveReq
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	if err := d.committer.Commit(id, clawhub.Decision{Approve: true, SkipBinary: body.SkipBinary}); err != nil {
+	// Task 14 will replace the whole function with POST /approvals/{id}.
+	reqPath := filepath.Join(d.skillsRoot, "_requests", id+".json")
+	data, err := os.ReadFile(reqPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	var installReq clawhub.InstallRequest
+	if err := json.Unmarshal(data, &installReq); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if err := d.committer.Commit(installReq, clawhub.Decision{Approve: true, SkipBinary: body.SkipBinary}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = os.Remove(reqPath)
 	if err := d.skillReg.Refresh(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -98,10 +115,23 @@ func (d *Daemon) handleSkillsApprove(w http.ResponseWriter, r *http.Request) {
 
 func (d *Daemon) handleSkillsDeny(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := d.committer.Commit(id, clawhub.Decision{Approve: false}); err != nil {
+	// Task 14 will replace the whole function with POST /approvals/{id}.
+	reqPath := filepath.Join(d.skillsRoot, "_requests", id+".json")
+	data, err := os.ReadFile(reqPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	var installReq clawhub.InstallRequest
+	if err := json.Unmarshal(data, &installReq); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if err := d.committer.Commit(installReq, clawhub.Decision{Approve: false}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = os.Remove(reqPath)
 	fmt.Fprintln(w, "denied")
 }
 

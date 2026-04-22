@@ -68,11 +68,11 @@ body
 	require.NoError(t, err)
 
 	inst := clawhub.NewInstaller(skillsRoot, fakeHub.URL, func(string) bool { return true })
-	reqID, err := inst.Stage(pkg)
+	installReq, err := inst.Stage(pkg)
 	require.NoError(t, err)
 
 	cm := clawhub.NewCommitter(skillsRoot, nil)
-	require.NoError(t, cm.Commit(reqID, clawhub.Decision{Approve: true, SkipBinary: true}))
+	require.NoError(t, cm.Commit(*installReq, clawhub.Decision{Approve: true, SkipBinary: true}))
 
 	reg := skills.NewRegistry(skillsRoot)
 	require.NoError(t, reg.Refresh())

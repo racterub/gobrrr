@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -54,36 +53,37 @@ func NewInstaller(skillsRoot, registryBaseURL string, hasBin BinChecker) *Instal
 	}
 }
 
-// Stage unpacks the bundle into <skillsRoot>/_requests/<id>_staging/,
-// parses frontmatter, detects missing binaries, and writes
-// <skillsRoot>/_requests/<id>.json. Returns the request-id.
-func (in *Installer) Stage(pkg *SkillPackage) (string, error) {
+// Stage unpacks the bundle into <skillsRoot>/_requests/<id>_staging/, parses
+// frontmatter, detects missing binaries, and returns the InstallRequest struct
+// ready to be placed into an approval payload. Unlike the old shape, Stage no
+// longer writes the request JSON to disk — the approval layer owns persistence.
+func (in *Installer) Stage(pkg *SkillPackage) (*InstallRequest, error) {
 	if pkg == nil {
-		return "", fmt.Errorf("clawhub: nil package")
+		return nil, fmt.Errorf("clawhub: nil package")
 	}
 	reqID, err := in.newRequestID(pkg)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	stagingDir := filepath.Join(in.skillsRoot, "_requests", reqID+"_staging")
 	if err := os.MkdirAll(stagingDir, 0700); err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := extractZip(pkg.BundleBytes, stagingDir); err != nil {
 		_ = os.RemoveAll(stagingDir)
-		return "", err
+		return nil, err
 	}
 
 	skillMD, err := os.ReadFile(filepath.Join(stagingDir, "SKILL.md"))
 	if err != nil {
 		_ = os.RemoveAll(stagingDir)
-		return "", fmt.Errorf("missing SKILL.md in bundle: %w", err)
+		return nil, fmt.Errorf("missing SKILL.md in bundle: %w", err)
 	}
 	fm, _, err := skills.ParseFrontmatter(skillMD)
 	if err != nil {
 		_ = os.RemoveAll(stagingDir)
-		return "", fmt.Errorf("parse frontmatter: %w", err)
+		return nil, fmt.Errorf("parse frontmatter: %w", err)
 	}
 
 	missing := []string{}
@@ -92,11 +92,10 @@ func (in *Installer) Stage(pkg *SkillPackage) (string, error) {
 			missing = append(missing, bin)
 		}
 	}
-
 	proposed := proposeCommands(fm, missing)
 
 	now := time.Now().UTC()
-	req := InstallRequest{
+	return &InstallRequest{
 		RequestID:        reqID,
 		Slug:             pkg.Slug,
 		Version:          pkg.Version,
@@ -108,19 +107,7 @@ func (in *Installer) Stage(pkg *SkillPackage) (string, error) {
 		ProposedCommands: proposed,
 		CreatedAt:        now,
 		ExpiresAt:        now.Add(requestTTL),
-	}
-	reqPath := filepath.Join(in.skillsRoot, "_requests", reqID+".json")
-	if err := os.MkdirAll(filepath.Dir(reqPath), 0700); err != nil {
-		return "", err
-	}
-	data, err := json.MarshalIndent(req, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	if err := writeAtomic(reqPath, data, 0600); err != nil {
-		return "", err
-	}
-	return reqID, nil
+	}, nil
 }
 
 func (in *Installer) composeSourceURL(slug, version string) string {

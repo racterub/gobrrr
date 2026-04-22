@@ -44,24 +44,13 @@ func NewCommitter(skillsRoot string, run CmdRunner) *Committer {
 	return &Committer{skillsRoot: skillsRoot, run: run}
 }
 
-// Commit reads the InstallRequest for reqID and either cleans up (deny) or
-// runs approved commands, copies staging to <skillsRoot>/<slug>/, writes
-// _meta.json, updates _lock.json, and clears the staging/request artifacts.
-func (c *Committer) Commit(reqID string, decision Decision) error {
-	reqPath := filepath.Join(c.skillsRoot, "_requests", reqID+".json")
-	data, err := os.ReadFile(reqPath)
-	if err != nil {
-		return fmt.Errorf("load request %s: %w", reqID, err)
-	}
-	var req InstallRequest
-	if err := json.Unmarshal(data, &req); err != nil {
-		return err
-	}
-
-	// Deny path: remove staging + request, done.
+// Commit finalizes a staged skill install for the given InstallRequest and
+// decision. Expects req.StagingDir to exist. On deny, removes staging and
+// returns nil.
+func (c *Committer) Commit(req InstallRequest, decision Decision) error {
+	// Deny path: remove staging, done.
 	if !decision.Approve {
 		_ = os.RemoveAll(req.StagingDir)
-		_ = os.Remove(reqPath)
 		return nil
 	}
 
@@ -139,9 +128,8 @@ func (c *Committer) Commit(reqID string, decision Decision) error {
 		return err
 	}
 
-	// Cleanup staging + request.
+	// Cleanup staging.
 	_ = os.RemoveAll(req.StagingDir)
-	_ = os.Remove(reqPath)
 	return nil
 }
 
