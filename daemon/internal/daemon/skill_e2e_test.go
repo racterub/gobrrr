@@ -11,11 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/racterub/gobrrr/internal/clawhub"
+	"github.com/racterub/gobrrr/internal/daemon"
 	"github.com/racterub/gobrrr/internal/security"
 	"github.com/racterub/gobrrr/internal/skills"
 )
@@ -97,6 +99,74 @@ body
 	raw, err := os.ReadFile(settingsPath)
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "Bash(echo:*)")
+
+	installedSkill := filepath.Join(skillsRoot, "noop", "SKILL.md")
+	assert.FileExists(t, installedSkill)
+}
+
+// TestE2E_ApprovalFlow_InstallSkill exercises the full install flow through
+// the new approval API: Stage → dispatcher.Create → dispatcher.Decide →
+// skill committed to <slug>/ and skill_install handler fires.
+func TestE2E_ApprovalFlow_InstallSkill(t *testing.T) {
+	skillMD := []byte(`---
+name: noop
+description: does nothing
+metadata:
+  gobrrr:
+    type: clawhub
+  openclaw:
+    requires:
+      tool_permissions:
+        read:
+          - "Bash(echo:*)"
+        write: []
+---
+
+body
+`)
+	bundle := buildSkillZip(t, map[string][]byte{"SKILL.md": skillMD})
+	sum := sha256.Sum256(bundle)
+	hexSum := hex.EncodeToString(sum[:])
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/skills/noop", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"skill":{"slug":"noop","displayName":"Noop","tags":{"latest":"1.0.0"}},"latestVersion":{"version":"1.0.0"}}`)
+	})
+	mux.HandleFunc("/api/v1/skills/noop/versions/1.0.0", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"version":{"version":"1.0.0","security":{"status":"clean","sha256hash":"%s"}}}`, hexSum)
+	})
+	mux.HandleFunc("/api/v1/download", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(bundle)
+	})
+	fakeHub := httptest.NewServer(mux)
+	defer fakeHub.Close()
+
+	skillsRoot := t.TempDir()
+	approvalsRoot := t.TempDir()
+
+	c := clawhub.NewClient(fakeHub.URL)
+	pkg, err := c.Fetch("noop", "1.0.0")
+	require.NoError(t, err)
+
+	inst := clawhub.NewInstaller(skillsRoot, fakeHub.URL, func(string) bool { return true })
+	installReq, err := inst.Stage(pkg)
+	require.NoError(t, err)
+
+	cm := clawhub.NewCommitter(skillsRoot, nil)
+	store := daemon.NewApprovalStore(approvalsRoot)
+	dispatcher := daemon.NewApprovalDispatcher(store)
+	dispatcher.Register("skill_install", daemon.NewSkillInstallHandlerForTesting(cm))
+
+	approval, err := dispatcher.Create("skill_install", "install noop@1.0.0", "",
+		[]string{"approve", "skip_binary", "deny"}, installReq, time.Hour)
+	require.NoError(t, err)
+
+	// Decide via dispatcher directly; the HTTP wrapper is covered by
+	// approvals_routes_test.go.
+	require.NoError(t, dispatcher.Decide(approval.ID, "skip_binary"))
 
 	installedSkill := filepath.Join(skillsRoot, "noop", "SKILL.md")
 	assert.FileExists(t, installedSkill)

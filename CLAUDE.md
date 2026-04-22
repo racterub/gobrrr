@@ -59,8 +59,8 @@ daemon/                        Go daemon and CLI
       routing.go               Result routing (telegram/stdout/file), output sanitization
       heartbeat.go             Uptime Kuma push heartbeats
       healthcheck.go           Health status evaluation (stuck tasks, failure streaks)
-      maintenance.go           Hourly log/queue/install-request pruning
-      skill_routes.go          HTTP handlers for skill search/install/approve/deny/uninstall
+      maintenance.go           Hourly log/queue/approval pruning
+      skill_routes.go          HTTP handlers for skill search/install/uninstall
       watchdog.go              Systemd sd_notify watchdog
     skills/                    Skill loader, registry, prompt builder, embedded system skills
       system/                  Bundled SKILL.md files embedded via //go:embed
@@ -100,8 +100,9 @@ identity.md          Assistant identity (user-editable)
 google/              Multi-account OAuth credentials (encrypted)
 memory/              Persistent memory entries + index
 skills/              Installed skills (system + ClawHub) — <slug>/SKILL.md + <slug>/_meta.json
-skills/_requests/    Pending install approvals (JSON + staged bundle dir, TTL 24h)
+skills/_requests/    Staged skill bundle dirs (approval metadata lives in _approvals/, TTL 24h)
 skills/_lock.json    ClawHub install manifest (slug → version/SHA256)
+_approvals/          Pending user-approval requests (kind-tagged, TTL 24h)
 logs/                Per-task worker output
 workers/             Ephemeral per-task settings.json
 workspace/           Worker CWD
@@ -112,14 +113,24 @@ output/              Safe directory for file: reply-to
 
 Workers see every installed skill via an `<available_skills>` block prepended to the prompt (built by `internal/skills.BuildPromptBlock`). Claude reads the referenced SKILL.md on demand; the block itself contains only name/description/path.
 
-Install flow:
+Install flow (unified approval system):
 
-1. `gobrrr skill install <slug>` → daemon fetches the ZIP from ClawHub, verifies SHA256, stages under `skills/_requests/<id>_staging/`, writes an `InstallRequest` JSON, prints an approval card.
-2. `gobrrr skill approve <id>` → runs approved binary commands (unless `--skip-binary`), copies staged skill to `skills/<slug>/`, writes `_meta.json`, updates `skills/_lock.json`.
-3. `gobrrr skill deny <id>` removes the staged request.
-4. System skills (`type: system`, embedded in the binary) are copied to `skills/<slug>/` on daemon start and never overwritten.
+1. `gobrrr skill install <slug>` → daemon fetches the ZIP from ClawHub, verifies SHA256, stages under `skills/_requests/<id>_staging/`, and creates a persistent approval at `~/.gobrrr/_approvals/<id>.json` with `kind: skill_install`.
+2. Any subscriber to `GET /approvals/stream` receives a `created` event; the gobrrr-telegram bot renders a Telegram inline-keyboard card with Approve / Skip-binary / Deny buttons.
+3. `gobrrr skill approve <id>` (or the Telegram button) posts `{"decision":"approve"}` to `POST /approvals/{id}`. The dispatcher claims the approval atomically, fires the `skill_install` handler, which runs approved binary commands and commits the staged skill to `skills/<slug>/`.
+4. `gobrrr skill deny <id>` sends `{"decision":"deny"}`; the handler removes the staging artifacts.
+5. Expired approvals (TTL 24h) are pruned hourly with a synthesized `deny` decision — same cleanup path as user-initiated deny.
+6. System skills (`type: system`, embedded in the binary) are copied to `skills/<slug>/` on daemon start and never overwritten.
 
 Permission merge: worker `settings.json` gains each installed skill's `approved_read_permissions` unconditionally and `approved_write_permissions` only when the task was submitted with `--allow-writes`.
+
+## Approvals
+
+Pending user-approval requests live under `~/.gobrrr/_approvals/<id>.json`. The shape is generic and kind-tagged (`kind: skill_install` today, with `kind: write_action` reserved for the future write-action migration tracked in TODO.md).
+
+- `POST /approvals/{id}` with JSON `{"decision": "<action>"}` — action is one of the kind's advertised actions.
+- `GET /approvals/stream` — SSE of `ApprovalEvent { type: "created"|"removed", request|id|decision }`. Rehydrates all pending approvals on connect so a restarted subscriber (e.g. the Telegram bot) catches up.
+- Decisions are atomic: the store file is deleted before the per-kind handler runs.
 
 ## Key Design Decisions
 

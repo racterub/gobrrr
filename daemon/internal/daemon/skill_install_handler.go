@@ -20,6 +20,13 @@ type skillInstallHandler struct {
 	committer committerLike
 }
 
+// NewSkillInstallHandlerForTesting exposes the internal handler to other
+// packages' tests. Production code registers via the dispatcher wiring in
+// daemon.New.
+func NewSkillInstallHandlerForTesting(c committerLike) ApprovalHandler {
+	return &skillInstallHandler{committer: c}
+}
+
 func (h *skillInstallHandler) Handle(req *ApprovalRequest, decision string) error {
 	var installReq clawhub.InstallRequest
 	if err := json.Unmarshal(req.Payload, &installReq); err != nil {
