@@ -83,3 +83,29 @@ func TestApprovalSubscriber_ConsumePending_UnknownID(t *testing.T) {
 	_, _, ok := sub.consumePending("nope")
 	assert.False(t, ok)
 }
+
+func TestBot_CallbackQuery_Routes_ApprovalPrefix(t *testing.T) {
+	called := ""
+	b := &Bot{}
+	b.SetOnApprovalCallback(func(data string) (bool, string) {
+		called = data
+		return true, "approve"
+	})
+	// Simulate a "ap:" prefix; approval callback takes it.
+	_, _ = b.dispatchCallback("ap:abcd:approve")
+	assert.Equal(t, "ap:abcd:approve", called)
+}
+
+func TestBot_CallbackQuery_FallsBackTo_Permission(t *testing.T) {
+	apCalled := ""
+	b := &Bot{permPending: map[string]*permEntry{}}
+	b.SetOnApprovalCallback(func(data string) (bool, string) {
+		apCalled = data
+		return false, "" // declines to handle
+	})
+	handled, _ := b.dispatchCallback("pa:XYZAB")
+	// Didn't route through approval path (no match), permission path returned
+	// false too (no pending code). Handled is false → "expired" in UI.
+	assert.False(t, handled)
+	assert.Equal(t, "", apCalled) // approval callback refused, so didn't "match"
+}

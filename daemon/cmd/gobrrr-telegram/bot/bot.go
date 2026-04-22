@@ -46,13 +46,21 @@ type Bot struct {
 	// onPermissionReply callback.
 	permMu            sync.Mutex
 	permPending       map[string]*permEntry
-	onPermissionReply func(requestID string, allow bool)
+	onPermissionReply  func(requestID string, allow bool)
+	onApprovalCallback func(data string) (bool, string)
 }
 
 // SetOnPermissionReply registers the callback used to relay the operator's
 // verdict back to Claude Code via the MCP permission notification.
 func (w *Bot) SetOnPermissionReply(fn func(requestID string, allow bool)) {
 	w.onPermissionReply = fn
+}
+
+// SetOnApprovalCallback registers the routing callback used by the bot when
+// an inline-keyboard callback carries the "ap:" prefix. Returns (handled,
+// decision) so the outer layer can build the AnswerCallbackQuery text.
+func (w *Bot) SetOnApprovalCallback(fn func(data string) (bool, string)) {
+	w.onApprovalCallback = fn
 }
 
 // ConsumePendingAck returns and clears the pending ack message_id for a chat,

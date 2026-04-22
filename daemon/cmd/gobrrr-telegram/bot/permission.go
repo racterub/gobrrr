@@ -134,21 +134,35 @@ func (w *Bot) HandlePermissionCallback(data string) (bool, bool) {
 }
 
 func (w *Bot) handleCallbackQuery(ctx context.Context, cq *models.CallbackQuery) {
-	handled, allow := w.HandlePermissionCallback(cq.Data)
-	text := ""
-	if handled {
-		if allow {
-			text = "approved"
-		} else {
-			text = "denied"
-		}
-	} else {
+	handled, text := w.dispatchCallback(cq.Data)
+	if !handled {
 		text = "expired"
 	}
 	_, _ = w.Inner().AnswerCallbackQuery(ctx, &tgbot.AnswerCallbackQueryParams{
 		CallbackQueryID: cq.ID,
 		Text:            text,
 	})
+}
+
+// dispatchCallback picks the right sub-handler based on prefix. "ap:" routes
+// through the approval subscriber; "pa:"/"pd:" through the permission flow.
+// Returns (handled, displayText).
+func (w *Bot) dispatchCallback(data string) (bool, string) {
+	if strings.HasPrefix(data, "ap:") && w.onApprovalCallback != nil {
+		handled, decision := w.onApprovalCallback(data)
+		if handled {
+			return true, decision
+		}
+		return false, ""
+	}
+	handled, allow := w.HandlePermissionCallback(data)
+	if handled {
+		if allow {
+			return true, "approved"
+		}
+		return true, "denied"
+	}
+	return false, ""
 }
 
 func permissionKeyboard(code string) models.InlineKeyboardMarkup {
