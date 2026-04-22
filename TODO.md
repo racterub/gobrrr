@@ -99,11 +99,10 @@ The `channel/index.ts` Bun MCP process consumed all available memory (31GB) on t
 **Files / docs:**
 - `daemon/internal/security/confirm.go` — `Gate` type to be removed
 - `daemon/internal/security/` — callers of `Gate.Request`/`Wait` (worker code paths that trigger write-action confirmation)
-- `daemon/internal/daemon/` — Phase 2 approval dispatcher (whatever the unified `POST /approvals/<id>` handler is called after Phase 2 lands)
-- `daemon/internal/daemon/sse.go` — extend `ApprovalRequestEvent` to carry write-action-specific payload (original task prompt, tool name, tool args, etc.)
-- `plugins/gobrrr-relay/index.ts` — if the MCP notification for write-action approvals differs from skill installs, may need a new notification kind
-- `plugins/gobrrr-telegram/` — button handling already exists from Phase 2; verify write-action callback_data routes correctly
-- Reference: `docs/superpowers/specs/2026-04-19-skill-ecosystem-design.md` (Phase 2 section) for the generic approval abstraction shape
+- `daemon/internal/daemon/approvals.go` — Phase 2 dispatcher; register a `write_action` kind handler alongside `skill_install`
+- `daemon/internal/daemon/sse.go` — extend the `ApprovalEvent` payload to carry write-action-specific fields (original task prompt, tool name, tool args, etc.)
+- `daemon/cmd/gobrrr-telegram/` — bot already subscribes to `GET /approvals/stream` and handles `ap:{id}:{decision}` callbacks from Phase 2; verify write-action kind renders correctly
+- Reference: `docs/superpowers/specs/2026-04-19-skill-ecosystem-design.md` (Phase 2) and `docs/superpowers/plans/2026-04-21-approval-routing.md`. Topology is daemon ↔ gobrrr-telegram direct (Option A) — no gobrrr-relay hop for approvals.
 
 **Constraints:**
 - No behavior change for the worker side: when a worker tries to run a write tool without approval, it must still block (effectively) until the decision arrives or the timeout elapses. If the new approval system is async-only, we need to bridge — either keep a thin in-process wait wrapper around the persistent store, or change the worker-side contract to fail-fast-and-resubmit like skill installs do.
