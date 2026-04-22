@@ -29,6 +29,24 @@ func (f *fakeHandler) Handle(req *ApprovalRequest, decision string) error {
 	return f.err
 }
 
+// callsSnapshot returns a copy of calls under lock so tests can assert without
+// racing with a Handle invocation that may still be writing (the SSE/HTTP
+// paths resolve handler calls off the goroutine that reads the result).
+func (f *fakeHandler) callsSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.calls))
+	copy(out, f.calls)
+	return out
+}
+
+// last returns the most recent (req, decision) pair under lock.
+func (f *fakeHandler) last() (*ApprovalRequest, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastReq, f.lastDec
+}
+
 func TestDispatcher_CreateDecide_FiresHandler(t *testing.T) {
 	store := NewApprovalStore(t.TempDir())
 	d := NewApprovalDispatcher(store)
@@ -41,8 +59,9 @@ func TestDispatcher_CreateDecide_FiresHandler(t *testing.T) {
 	assert.NotEmpty(t, req.ID)
 
 	require.NoError(t, d.Decide(req.ID, "approve"))
-	assert.Equal(t, []string{"approve"}, h.calls)
-	assert.Equal(t, "foo", mustString(h.lastReq.Payload, "slug"))
+	assert.Equal(t, []string{"approve"}, h.callsSnapshot())
+	lastReq, _ := h.last()
+	assert.Equal(t, "foo", mustString(lastReq.Payload, "slug"))
 
 	// file is gone after Decide
 	_, err = store.Load(req.ID)

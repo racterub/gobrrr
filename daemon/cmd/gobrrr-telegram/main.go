@@ -16,6 +16,7 @@ import (
 	"github.com/racterub/gobrrr/cmd/gobrrr-telegram/bot"
 	"github.com/racterub/gobrrr/cmd/gobrrr-telegram/mcpserver"
 	"github.com/racterub/gobrrr/internal/client"
+	"github.com/racterub/gobrrr/internal/config"
 )
 
 func main() {
@@ -65,8 +66,7 @@ func main() {
 	// daemon's default socket path; override with GOBRRR_SOCKET_PATH.
 	sockPath := os.Getenv("GOBRRR_SOCKET_PATH")
 	if sockPath == "" {
-		home, _ := os.UserHomeDir()
-		sockPath = filepath.Join(home, ".gobrrr", "gobrrr.sock")
+		sockPath = filepath.Join(config.GobrrDir(), "gobrrr.sock")
 	}
 	daemonClient := client.New(sockPath)
 	sub := bot.NewApprovalSubscriber(b, daemonClient)

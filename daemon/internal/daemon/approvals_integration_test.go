@@ -68,6 +68,7 @@ func TestApprovals_Integration_CreateStreamDecide(t *testing.T) {
 	assert.Contains(t, removed, `"decision":"approve"`)
 
 	// Handler was called with the approve decision.
-	assert.Equal(t, []string{"approve"}, h.calls)
-	assert.True(t, strings.Contains(string(h.lastReq.Payload), "foo"))
+	assert.Equal(t, []string{"approve"}, h.callsSnapshot())
+	lastReq, _ := h.last()
+	assert.True(t, strings.Contains(string(lastReq.Payload), "foo"))
 }

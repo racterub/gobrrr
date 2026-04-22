@@ -85,25 +85,27 @@ type pendingApproval struct {
 	messageID int
 }
 
+// approvalClient is the daemon-facing surface the subscriber needs. Satisfied
+// by *client.Client in production; a narrow interface keeps the tests easy to
+// fake without dragging in a full HTTP round-trip.
+type approvalClient interface {
+	StreamApprovals(ctx context.Context) (<-chan client.ApprovalEvent, error)
+	DecideApproval(id, decision string) error
+}
+
 // ApprovalSubscriber is the bot-side runtime that (a) subscribes to the daemon's
 // /approvals/stream, (b) renders + sends Telegram cards for `created` events,
 // (c) posts the user's decision back to the daemon on callback, and (d) edits
 // the message to show the resolution when `removed` events arrive.
 type ApprovalSubscriber struct {
 	bot    *Bot
-	client interface {
-		StreamApprovals(ctx context.Context) (<-chan client.ApprovalEvent, error)
-		DecideApproval(id, decision string) error
-	}
+	client approvalClient
 
 	mu      sync.Mutex
 	pending map[string]pendingApproval
 }
 
-func NewApprovalSubscriber(b *Bot, c interface {
-	StreamApprovals(ctx context.Context) (<-chan client.ApprovalEvent, error)
-	DecideApproval(id, decision string) error
-}) *ApprovalSubscriber {
+func NewApprovalSubscriber(b *Bot, c approvalClient) *ApprovalSubscriber {
 	return &ApprovalSubscriber{
 		bot:     b,
 		client:  c,

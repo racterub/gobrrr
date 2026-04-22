@@ -57,8 +57,11 @@ func (w *Bot) SetOnPermissionReply(fn func(requestID string, allow bool)) {
 }
 
 // SetOnApprovalCallback registers the routing callback used by the bot when
-// an inline-keyboard callback carries the "ap:" prefix. Returns (handled,
-// decision) so the outer layer can build the AnswerCallbackQuery text.
+// an inline-keyboard callback carries the "ap:" prefix. The callback itself
+// returns (handled, decision): "handled" tells dispatchCallback whether to
+// claim the event (blocking fallthrough to the permission path), and
+// "decision" is echoed back via AnswerCallbackQuery so Telegram shows a
+// brief toast to the tapping user.
 func (w *Bot) SetOnApprovalCallback(fn func(data string) (bool, string)) {
 	w.onApprovalCallback = fn
 }

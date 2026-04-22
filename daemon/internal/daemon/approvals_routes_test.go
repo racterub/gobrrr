@@ -31,7 +31,7 @@ func TestApprovalsRoute_Decide_InvokesHandler(t *testing.T) {
 	mux.ServeHTTP(w, r)
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
-	assert.Equal(t, []string{"approve"}, h.calls)
+	assert.Equal(t, []string{"approve"}, h.callsSnapshot())
 }
 
 func TestApprovalsRoute_MissingDecision_400(t *testing.T) {

@@ -11,16 +11,22 @@ import (
 )
 
 // Meta is the on-disk _meta.json the installer writes at approval time.
+//
+// Terminology: the "approved_*" fields hold the permission bucket that was
+// already granted at install time. These are distinct from the approval-flow
+// decision literal "approve" (the string the user picks in the inline card
+// and `gobrrr skill approve` posts to POST /approvals/{id}); the latter is a
+// one-shot decision, while "approved_*" is the persisted result.
 type Meta struct {
-	Slug                     string               `json:"slug"`
-	Version                  string               `json:"version"`
-	SourceURL                string               `json:"source_url,omitempty"`
-	InstalledAt              string               `json:"installed_at"`
-	ApprovedAt               string               `json:"approved_at,omitempty"`
-	Fingerprint              string               `json:"fingerprint"`
-	ApprovedReadPermissions  []string             `json:"approved_read_permissions"`
-	ApprovedWritePermissions []string             `json:"approved_write_permissions"`
-	ApprovedBinaries         []string             `json:"approved_binaries,omitempty"`
+	Slug                     string                `json:"slug"`
+	Version                  string                `json:"version"`
+	SourceURL                string                `json:"source_url,omitempty"`
+	InstalledAt              string                `json:"installed_at"`
+	ApprovedAt               string                `json:"approved_at,omitempty"`
+	Fingerprint              string                `json:"fingerprint"`
+	ApprovedReadPermissions  []string              `json:"approved_read_permissions"`
+	ApprovedWritePermissions []string              `json:"approved_write_permissions"`
+	ApprovedBinaries         []string              `json:"approved_binaries,omitempty"`
 	BinaryInstallCommands    []BinaryInstallRecord `json:"binary_install_commands,omitempty"`
 }
 

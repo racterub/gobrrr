@@ -24,8 +24,9 @@ func TestPruneExpiredApprovals_SynthesizesDeny(t *testing.T) {
 
 	require.NoError(t, PruneExpiredApprovals(d))
 
-	assert.Equal(t, []string{"deny"}, h.calls)
-	assert.Equal(t, expired.ID, h.lastReq.ID)
+	assert.Equal(t, []string{"deny"}, h.callsSnapshot())
+	lastReq, _ := h.last()
+	assert.Equal(t, expired.ID, lastReq.ID)
 
 	// Fresh approval still there.
 	got, err := store.Load(fresh.ID)
