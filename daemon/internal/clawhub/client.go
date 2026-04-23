@@ -77,11 +77,14 @@ func (c *Client) Fetch(slug, version string) (*SkillPackage, error) {
 		return nil, fmt.Errorf("clawhub: empty slug")
 	}
 
+	// Always fetch metadata: we need the owner handle to compose the
+	// human-readable source URL for approval cards, and we still resolve
+	// "latest" here when the caller didn't pin a version.
+	meta, err := c.getMetadata(slug)
+	if err != nil {
+		return nil, err
+	}
 	if version == "" {
-		meta, err := c.getMetadata(slug)
-		if err != nil {
-			return nil, err
-		}
 		switch {
 		case meta.LatestVersion != nil && meta.LatestVersion.Version != "":
 			version = meta.LatestVersion.Version
@@ -90,6 +93,10 @@ func (c *Client) Fetch(slug, version string) (*SkillPackage, error) {
 		default:
 			return nil, fmt.Errorf("clawhub: %s has no latest version", slug)
 		}
+	}
+	var ownerHandle string
+	if meta.Owner != nil {
+		ownerHandle = meta.Owner.Handle
 	}
 
 	detail, err := c.getVersionDetail(slug, version)
@@ -115,6 +122,7 @@ func (c *Client) Fetch(slug, version string) (*SkillPackage, error) {
 		Slug:        slug,
 		Version:     version,
 		SHA256:      expectedHash,
+		OwnerHandle: ownerHandle,
 		BundleBytes: zipBytes,
 	}, nil
 }

@@ -43,6 +43,9 @@ type skillMetadata struct {
 	LatestVersion *struct {
 		Version string `json:"version"`
 	} `json:"latestVersion"`
+	Owner *struct {
+		Handle string `json:"handle"`
+	} `json:"owner"`
 }
 
 // versionDetail is the /api/v1/skills/<slug>/versions/<version> response.
@@ -59,10 +62,16 @@ type versionDetail struct {
 
 // SkillPackage is the resolved download: raw ZIP bytes plus integrity proof.
 // Downstream Task 13 extracts BundleBytes with archive/zip.
+//
+// OwnerHandle is the ClawHub username of the skill publisher, used to compose
+// the human-readable source URL (https://clawhub.ai/<handle>/<slug>). May be
+// empty if the registry response omits owner info; callers fall back to the
+// API download URL in that case.
 type SkillPackage struct {
 	Slug        string
 	Version     string
 	SHA256      string
+	OwnerHandle string
 	BundleBytes []byte
 }
 

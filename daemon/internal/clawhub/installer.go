@@ -99,7 +99,7 @@ func (in *Installer) Stage(pkg *SkillPackage) (*InstallRequest, error) {
 		RequestID:        reqID,
 		Slug:             pkg.Slug,
 		Version:          pkg.Version,
-		SourceURL:        in.composeSourceURL(pkg.Slug, pkg.Version),
+		SourceURL:        in.composeSourceURL(pkg.OwnerHandle, pkg.Slug, pkg.Version),
 		SHA256:           pkg.SHA256,
 		StagingDir:       stagingDir,
 		Frontmatter:      *fm,
@@ -110,7 +110,15 @@ func (in *Installer) Stage(pkg *SkillPackage) (*InstallRequest, error) {
 	}, nil
 }
 
-func (in *Installer) composeSourceURL(slug, version string) string {
+// composeSourceURL returns a user-facing URL for the approval card. If the
+// owner handle is known we use the human-readable /<handle>/<slug> path that
+// resolves to the skill's public page on the ClawHub site; otherwise we fall
+// back to the API download URL (the only URL shape we can reconstruct from
+// package fields alone).
+func (in *Installer) composeSourceURL(ownerHandle, slug, version string) string {
+	if ownerHandle != "" {
+		return in.registryBaseURL + "/" + url.PathEscape(ownerHandle) + "/" + url.PathEscape(slug)
+	}
 	return in.registryBaseURL + "/api/v1/download?slug=" + url.QueryEscape(slug) + "&version=" + url.QueryEscape(version)
 }
 

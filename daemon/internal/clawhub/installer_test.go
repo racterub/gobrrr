@@ -45,7 +45,7 @@ body
 	bundle := buildZip(t, map[string][]byte{"SKILL.md": skillMD})
 	pkg := &SkillPackage{
 		Slug: "github", Version: "1.4.2",
-		SHA256: "abc123", BundleBytes: bundle,
+		SHA256: "abc123", OwnerHandle: "octocat", BundleBytes: bundle,
 	}
 
 	inst := NewInstaller(skillsRoot, "https://clawhub.ai", func(bin string) bool {
@@ -59,9 +59,8 @@ body
 	assert.Equal(t, "github", installReq.Slug)
 	assert.Equal(t, "1.4.2", installReq.Version)
 	assert.Equal(t, "abc123", installReq.SHA256)
-	assert.Contains(t, installReq.SourceURL, "clawhub.ai")
-	assert.Contains(t, installReq.SourceURL, "slug=github")
-	assert.Contains(t, installReq.SourceURL, "version=1.4.2")
+	// Pretty URL: <base>/<handle>/<slug> — resolves to ClawHub's public skill page.
+	assert.Equal(t, "https://clawhub.ai/octocat/github", installReq.SourceURL)
 	assert.Contains(t, installReq.MissingBins, "gh")
 	require.NotEmpty(t, installReq.ProposedCommands)
 	found := false
@@ -77,6 +76,28 @@ body
 	assert.FileExists(t, filepath.Join(installReq.StagingDir, "SKILL.md"))
 	assert.False(t, installReq.ExpiresAt.IsZero())
 	assert.True(t, installReq.ExpiresAt.After(installReq.CreatedAt))
+}
+
+func TestInstaller_SourceURL_FallsBackToAPIWhenHandleMissing(t *testing.T) {
+	// When the registry metadata doesn't surface an owner handle, the installer
+	// must still produce a working source URL so the approval card is not broken.
+	skillsRoot := t.TempDir()
+	skillMD := []byte(`---
+name: github
+description: GitHub ops
+metadata:
+  gobrrr: { type: clawhub }
+  openclaw: { requires: { tool_permissions: {} } }
+---
+body
+`)
+	pkg := &SkillPackage{Slug: "github", Version: "1.4.2", BundleBytes: buildZip(t, map[string][]byte{"SKILL.md": skillMD})}
+	inst := NewInstaller(skillsRoot, "https://clawhub.ai", func(string) bool { return true })
+	installReq, err := inst.Stage(pkg)
+	require.NoError(t, err)
+	assert.Contains(t, installReq.SourceURL, "clawhub.ai")
+	assert.Contains(t, installReq.SourceURL, "slug=github")
+	assert.Contains(t, installReq.SourceURL, "version=1.4.2")
 }
 
 func TestInstaller_NoMissingBinsYieldsNoProposals(t *testing.T) {
