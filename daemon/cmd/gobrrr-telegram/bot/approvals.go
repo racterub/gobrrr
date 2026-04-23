@@ -158,6 +158,7 @@ func ParseApprovalCallback(data string) (string, string, bool) {
 type pendingApproval struct {
 	chatID    int64
 	messageID int
+	title     string
 }
 
 // approvalClient is the daemon-facing surface the subscriber needs. Satisfied
@@ -191,7 +192,7 @@ func NewApprovalSubscriber(b *Bot, c approvalClient) *ApprovalSubscriber {
 func (s *ApprovalSubscriber) trackPending(req *client.ApprovalRequest, chatID int64, messageID int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.pending[req.ID] = pendingApproval{chatID: chatID, messageID: messageID}
+	s.pending[req.ID] = pendingApproval{chatID: chatID, messageID: messageID, title: req.Title}
 }
 
 func (s *ApprovalSubscriber) hasPending(id string) bool {
@@ -201,14 +202,14 @@ func (s *ApprovalSubscriber) hasPending(id string) bool {
 	return ok
 }
 
-func (s *ApprovalSubscriber) consumePending(id string) (int64, int, bool) {
+func (s *ApprovalSubscriber) consumePending(id string) (pendingApproval, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.pending[id]
 	if ok {
 		delete(s.pending, id)
 	}
-	return p.chatID, p.messageID, ok
+	return p, ok
 }
 
 // Run connects to the daemon stream and processes events until ctx is
@@ -264,7 +265,7 @@ func (s *ApprovalSubscriber) handleCreated(ctx context.Context, req *client.Appr
 }
 
 func (s *ApprovalSubscriber) handleRemoved(ctx context.Context, id, decision string) {
-	chatID, messageID, ok := s.consumePending(id)
+	p, ok := s.consumePending(id)
 	if !ok {
 		return
 	}
@@ -275,16 +276,23 @@ func (s *ApprovalSubscriber) handleRemoved(ctx context.Context, id, decision str
 	case "skip_binary":
 		suffix = "\n\n⏭️ approved (binary skipped)"
 	}
+	// Prefer the original request title ("install skill foo@1.0.0") so the user
+	// sees what was actually decided; fall back to the ID only when the bot was
+	// restarted and lost the in-memory title.
+	label := p.title
+	if label == "" {
+		label = "approval " + id
+	}
 	// Edit the original body + clear the keyboard. Fetching the existing text is
 	// unnecessary — we just append a resolution marker; Telegram accepts the call.
 	_, _ = s.bot.Inner().EditMessageReplyMarkup(ctx, &tgbot.EditMessageReplyMarkupParams{
-		ChatID:      chatID,
-		MessageID:   messageID,
+		ChatID:      p.chatID,
+		MessageID:   p.messageID,
 		ReplyMarkup: models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{}},
 	})
 	_, _ = s.bot.Inner().SendMessage(ctx, &tgbot.SendMessageParams{
-		ChatID: chatID,
-		Text:   "approval " + id + suffix,
+		ChatID: p.chatID,
+		Text:   label + suffix,
 	})
 }
 

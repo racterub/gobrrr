@@ -139,21 +139,22 @@ func TestButtonLabel(t *testing.T) {
 
 func TestApprovalSubscriber_TracksPending_OnCreatedEvent(t *testing.T) {
 	sub := NewApprovalSubscriber(nil, nil) // bot/client are nil — we only test state
-	req := &client.ApprovalRequest{ID: "abcd", Kind: "skill_install", Actions: []string{"approve", "deny"}}
+	req := &client.ApprovalRequest{ID: "abcd", Kind: "skill_install", Title: "install skill foo@1.0.0", Actions: []string{"approve", "deny"}}
 
 	// Simulate "created" event bookkeeping without actually sending to Telegram.
 	sub.trackPending(req, 12345, 67)
 	assert.True(t, sub.hasPending("abcd"))
-	chatID, messageID, ok := sub.consumePending("abcd")
+	p, ok := sub.consumePending("abcd")
 	assert.True(t, ok)
-	assert.Equal(t, int64(12345), chatID)
-	assert.Equal(t, 67, messageID)
+	assert.Equal(t, int64(12345), p.chatID)
+	assert.Equal(t, 67, p.messageID)
+	assert.Equal(t, "install skill foo@1.0.0", p.title)
 	assert.False(t, sub.hasPending("abcd"))
 }
 
 func TestApprovalSubscriber_ConsumePending_UnknownID(t *testing.T) {
 	sub := NewApprovalSubscriber(nil, nil)
-	_, _, ok := sub.consumePending("nope")
+	_, ok := sub.consumePending("nope")
 	assert.False(t, ok)
 }
 
