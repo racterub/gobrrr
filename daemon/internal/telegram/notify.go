@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"unicode/utf16"
 )
 
 const (
@@ -108,22 +109,25 @@ func (n *Notifier) sendChunk(text, parseMode string) error {
 	return nil
 }
 
-// splitMessage splits text into chunks no longer than maxLen characters.
-// It splits on rune boundaries.
+// splitMessage splits text into chunks no longer than maxLen UTF-16 code
+// units, since that's what Telegram's 4096-character limit measures.
+// Splits happen on rune boundaries.
 func splitMessage(text string, maxLen int) []string {
-	if len(text) <= maxLen {
-		return []string{text}
-	}
-
 	var chunks []string
-	runes := []rune(text)
-	for len(runes) > 0 {
-		end := maxLen
-		if end > len(runes) {
-			end = len(runes)
+	start := 0
+	unitCount := 0
+	for i, r := range text {
+		size := utf16.RuneLen(r)
+		if size < 0 {
+			size = 1 // utf8.RuneError; conservative single unit
 		}
-		chunks = append(chunks, string(runes[:end]))
-		runes = runes[end:]
+		if unitCount+size > maxLen {
+			chunks = append(chunks, text[start:i])
+			start = i
+			unitCount = 0
+		}
+		unitCount += size
 	}
+	chunks = append(chunks, text[start:])
 	return chunks
 }
