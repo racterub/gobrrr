@@ -98,13 +98,41 @@ func TestDispatcher_DecideEmits_OnRemove_Callback(t *testing.T) {
 	store := NewApprovalStore(t.TempDir())
 	d := NewApprovalDispatcher(store)
 	d.Register("k", &fakeHandler{})
-	var gotID, gotDec string
-	d.SetCallbacks(nil, func(id, dec string) { gotID, gotDec = id, dec })
+	var gotID, gotDec, gotErr string
+	d.SetCallbacks(nil, func(id, dec, errMsg string) { gotID, gotDec, gotErr = id, dec, errMsg })
 	req, err := d.Create("k", "t", "b", []string{"approve"}, nil, time.Minute)
 	require.NoError(t, err)
 	require.NoError(t, d.Decide(req.ID, "approve"))
 	assert.Equal(t, req.ID, gotID)
 	assert.Equal(t, "approve", gotDec)
+	assert.Equal(t, "", gotErr, "successful Decide should report empty error message")
+}
+
+// TestDispatcher_HandlerError_PropagatesToCallback locks in the contract that a
+// handler error is surfaced to onRemove subscribers (and ultimately SSE
+// listeners) instead of being silently swallowed. Without this, a Telegram bot
+// rendering "removed" events would show ✅ for an install that actually failed
+// to commit.
+func TestDispatcher_HandlerError_PropagatesToCallback(t *testing.T) {
+	store := NewApprovalStore(t.TempDir())
+	d := NewApprovalDispatcher(store)
+	d.Register("k", &fakeHandler{err: errors.New("commit failed")})
+
+	var gotID, gotDec, gotErr string
+	d.SetCallbacks(nil, func(id, dec, errMsg string) {
+		gotID, gotDec, gotErr = id, dec, errMsg
+	})
+
+	req, err := d.Create("k", "t", "b", []string{"approve"}, nil, time.Minute)
+	require.NoError(t, err)
+
+	decideErr := d.Decide(req.ID, "approve")
+	require.Error(t, decideErr)
+	assert.Contains(t, decideErr.Error(), "commit failed")
+
+	assert.Equal(t, req.ID, gotID)
+	assert.Equal(t, "approve", gotDec)
+	assert.Equal(t, "commit failed", gotErr)
 }
 
 func mustString(raw json.RawMessage, key string) string {

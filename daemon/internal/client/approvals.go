@@ -25,12 +25,14 @@ type ApprovalRequest struct {
 	ExpiresAt string          `json:"expires_at"`
 }
 
-// ApprovalEvent mirrors daemon.ApprovalEvent for SSE consumers.
+// ApprovalEvent mirrors daemon.ApprovalEvent for SSE consumers. Error carries
+// the per-kind handler's failure message on "removed" events; empty on success.
 type ApprovalEvent struct {
 	Type     string           `json:"type"`
 	Request  *ApprovalRequest `json:"request,omitempty"`
 	ID       string           `json:"id,omitempty"`
 	Decision string           `json:"decision,omitempty"`
+	Error    string           `json:"error,omitempty"`
 }
 
 // DecideApproval posts a decision to the daemon's generic approval endpoint.

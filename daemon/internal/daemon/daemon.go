@@ -99,8 +99,8 @@ func New(cfg *config.Config, socket string) *Daemon {
 		func(r *ApprovalRequest) {
 			approvalHub.Emit(ApprovalEvent{Type: ApprovalEventCreated, Request: r})
 		},
-		func(id, dec string) {
-			approvalHub.Emit(ApprovalEvent{Type: ApprovalEventRemoved, ID: id, Decision: dec})
+		func(id, dec, errMsg string) {
+			approvalHub.Emit(ApprovalEvent{Type: ApprovalEventRemoved, ID: id, Decision: dec, Error: errMsg})
 		},
 	)
 	approvals.Register("skill_install", &skillInstallHandler{committer: committer})

@@ -227,7 +227,7 @@ func (s *ApprovalSubscriber) Run(ctx context.Context) error {
 		case "created":
 			s.handleCreated(ctx, ev.Request)
 		case "removed":
-			s.handleRemoved(ctx, ev.ID, ev.Decision)
+			s.handleRemoved(ctx, ev.ID, ev.Decision, ev.Error)
 		}
 	}
 	return nil
@@ -264,16 +264,21 @@ func (s *ApprovalSubscriber) handleCreated(ctx context.Context, req *client.Appr
 	s.trackPending(req, ownerID, msg.ID)
 }
 
-func (s *ApprovalSubscriber) handleRemoved(ctx context.Context, id, decision string) {
+func (s *ApprovalSubscriber) handleRemoved(ctx context.Context, id, decision, errMsg string) {
 	p, ok := s.consumePending(id)
 	if !ok {
 		return
 	}
+	// A non-empty errMsg means the per-kind handler failed (e.g. skill commit
+	// errored after the user approved). Surface that explicitly so the user
+	// doesn't see ✅ for an action that didn't actually take effect.
 	suffix := "\n\n❌ denied"
-	switch decision {
-	case "approve":
+	switch {
+	case errMsg != "":
+		suffix = "\n\n⚠️ failed: " + errMsg
+	case decision == "approve":
 		suffix = "\n\n✅ approved"
-	case "skip_binary":
+	case decision == "skip_binary":
 		suffix = "\n\n⏭️ approved (binary skipped)"
 	}
 	// Prefer the original request title ("install skill foo@1.0.0") so the user

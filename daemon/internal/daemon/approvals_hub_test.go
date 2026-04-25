@@ -38,8 +38,8 @@ func TestDispatcher_EmitsVia_Hub(t *testing.T) {
 	d.Register("k", &fakeHandler{})
 	d.SetCallbacks(
 		func(r *ApprovalRequest) { hub.Emit(ApprovalEvent{Type: ApprovalEventCreated, Request: r}) },
-		func(id, dec string) {
-			hub.Emit(ApprovalEvent{Type: ApprovalEventRemoved, ID: id, Decision: dec})
+		func(id, dec, errMsg string) {
+			hub.Emit(ApprovalEvent{Type: ApprovalEventRemoved, ID: id, Decision: dec, Error: errMsg})
 		},
 	)
 

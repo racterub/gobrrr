@@ -28,7 +28,7 @@ type ApprovalDispatcher struct {
 	mu       sync.RWMutex
 	handlers map[string]ApprovalHandler
 	onCreate func(*ApprovalRequest)
-	onRemove func(id, decision string)
+	onRemove func(id, decision, errMsg string)
 }
 
 func NewApprovalDispatcher(store *ApprovalStore) *ApprovalDispatcher {
@@ -45,8 +45,11 @@ func (d *ApprovalDispatcher) Register(kind string, h ApprovalHandler) {
 }
 
 // SetCallbacks wires post-Create and post-Decide hooks. Intended for SSE
-// fan-out; either may be nil.
-func (d *ApprovalDispatcher) SetCallbacks(onCreate func(*ApprovalRequest), onRemove func(id, decision string)) {
+// fan-out; either may be nil. onRemove receives the empty string for errMsg
+// on success, or the handler error's message on failure — subscribers must
+// distinguish the two so they don't render a successful resolution for a
+// handler that failed.
+func (d *ApprovalDispatcher) SetCallbacks(onCreate func(*ApprovalRequest), onRemove func(id, decision, errMsg string)) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.onCreate = onCreate
@@ -126,7 +129,11 @@ func (d *ApprovalDispatcher) Decide(id, decision string) error {
 	}
 	handleErr := h.Handle(req, decision)
 	if removeCB != nil {
-		removeCB(id, decision)
+		errMsg := ""
+		if handleErr != nil {
+			errMsg = handleErr.Error()
+		}
+		removeCB(id, decision, errMsg)
 	}
 	return handleErr
 }

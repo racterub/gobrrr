@@ -12,13 +12,16 @@ const (
 )
 
 // ApprovalEvent is the SSE payload. For created events, Request carries the
-// full record (bot needs it to render a card). For removed events only ID and
-// Decision are set.
+// full record (bot needs it to render a card). For removed events ID and
+// Decision are set; Error carries the per-kind handler's failure message
+// (empty on success) so subscribers can render success vs failure outcomes
+// distinctly without polling.
 type ApprovalEvent struct {
 	Type     ApprovalEventType `json:"type"`
 	Request  *ApprovalRequest  `json:"request,omitempty"`
 	ID       string            `json:"id,omitempty"`
 	Decision string            `json:"decision,omitempty"`
+	Error    string            `json:"error,omitempty"`
 }
 
 const approvalBufferSize = 64
