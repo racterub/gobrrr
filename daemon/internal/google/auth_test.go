@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	vault "github.com/racterub/gobrrr/internal/crypto"
@@ -124,6 +125,35 @@ func TestGetHTTPClient(t *testing.T) {
 	client, err := am.GetHTTPClient("personal")
 	require.NoError(t, err)
 	assert.NotNil(t, client)
+}
+
+func TestSaveAccount_RewriteUsesAtomicRename(t *testing.T) {
+	// os.WriteFile truncates in place — same inode after rewrite.
+	// Atomic .tmp + rename produces a new inode. Rewriting the same
+	// account exercises both files: credentials.enc (per-account blob)
+	// and accounts.json (shared index). Both must be atomic so a crash
+	// mid-write can't surface a half-written file to readers.
+	am, dir := newTestManager(t)
+	token := &oauth2.Token{RefreshToken: "r", AccessToken: "a", TokenType: "Bearer"}
+
+	require.NoError(t, am.SaveAccount("alice", "a@example.com", token, "cid", "cs"))
+	idxPath := filepath.Join(dir, "accounts.json")
+	encPath := filepath.Join(dir, "alice", "credentials.enc")
+	idxInodeBefore := inodeOf(t, idxPath)
+	encInodeBefore := inodeOf(t, encPath)
+
+	require.NoError(t, am.SaveAccount("alice", "a@example.com", token, "cid", "cs2"))
+	assert.NotEqual(t, idxInodeBefore, inodeOf(t, idxPath),
+		"accounts.json rewrite must use atomic .tmp + rename, not in-place truncate")
+	assert.NotEqual(t, encInodeBefore, inodeOf(t, encPath),
+		"credentials.enc rewrite must use atomic .tmp + rename, not in-place truncate")
+}
+
+func inodeOf(t *testing.T, path string) uint64 {
+	t.Helper()
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	return info.Sys().(*syscall.Stat_t).Ino
 }
 
 func TestStartAndCompleteOAuthFlow(t *testing.T) {

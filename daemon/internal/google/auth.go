@@ -98,7 +98,7 @@ func (am *AccountManager) SaveAccount(name, email string, token *oauth2.Token, c
 	}
 
 	encPath := filepath.Join(accountDir, credentialsFile)
-	if err := os.WriteFile(encPath, ciphertext, 0600); err != nil {
+	if err := writeAtomic(encPath, ciphertext, 0600); err != nil {
 		return fmt.Errorf("google: write credentials: %w", err)
 	}
 
@@ -263,17 +263,29 @@ func (am *AccountManager) loadIndex() (*accountsIndex, error) {
 	return &idx, nil
 }
 
-// saveIndex writes accounts.json atomically.
+// saveIndex writes accounts.json atomically via .tmp + rename.
 func (am *AccountManager) saveIndex(idx *accountsIndex) error {
 	data, err := json.MarshalIndent(idx, "", "    ")
 	if err != nil {
 		return fmt.Errorf("google: marshal accounts index: %w", err)
 	}
 	idxPath := filepath.Join(am.dir, accountsFile)
-	if err := os.WriteFile(idxPath, data, 0600); err != nil {
+	if err := writeAtomic(idxPath, data, 0600); err != nil {
 		return fmt.Errorf("google: write accounts index: %w", err)
 	}
 	return nil
+}
+
+// writeAtomic writes data to path via a sibling .tmp file plus rename so
+// readers never observe a partial write. Inline duplicate of the helper
+// in clawhub/installer.go and daemon/approvals_store.go — consolidation
+// into a shared atomicfs package is tracked separately (Refactor #6).
+func writeAtomic(path string, data []byte, mode os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // updateIndex adds or updates the entry for name in accounts.json.
