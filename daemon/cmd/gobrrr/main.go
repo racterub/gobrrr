@@ -225,6 +225,38 @@ var logsCmd = &cobra.Command{
 	},
 }
 
+// --- approve / deny ---
+
+// Top-level approve/deny act on any pending approval id (skill_install today,
+// write_action soon). Per-kind subcommands like `gobrrr skill approve` still
+// exist when a kind needs extra options (e.g. --skip-binary).
+
+var approveCmd = &cobra.Command{
+	Use:   "approve <approval-id>",
+	Short: "Approve a pending approval request",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := newClient().DecideApproval(args[0], "approve"); err != nil {
+			return err
+		}
+		fmt.Println("approved")
+		return nil
+	},
+}
+
+var denyCmd = &cobra.Command{
+	Use:   "deny <approval-id>",
+	Short: "Deny a pending approval request",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := newClient().DecideApproval(args[0], "deny"); err != nil {
+			return err
+		}
+		fmt.Println("denied")
+		return nil
+	},
+}
+
 // --- gmail / gcal / memory / setup (stubs) ---
 
 var gmailCmd = &cobra.Command{
@@ -964,6 +996,8 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(cancelCmd)
 	rootCmd.AddCommand(logsCmd)
+	rootCmd.AddCommand(approveCmd)
+	rootCmd.AddCommand(denyCmd)
 	rootCmd.AddCommand(gmailCmd)
 	rootCmd.AddCommand(gcalCmd)
 	rootCmd.AddCommand(memoryCmd)
