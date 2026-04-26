@@ -23,7 +23,6 @@ import (
 	"github.com/racterub/gobrrr/internal/google"
 	"github.com/racterub/gobrrr/internal/memory"
 	"github.com/racterub/gobrrr/internal/scheduler"
-	"github.com/racterub/gobrrr/internal/security"
 	"github.com/racterub/gobrrr/internal/session"
 	"github.com/racterub/gobrrr/internal/skills"
 	"github.com/racterub/gobrrr/internal/telegram"
@@ -43,7 +42,6 @@ type Daemon struct {
 	sseHub        *SSEHub
 	heartbeat     *Heartbeat
 	healthChecker *HealthChecker
-	confirmGate   *security.Gate
 	startTime     time.Time
 	session       *session.Manager
 	scheduler     *scheduler.Scheduler
@@ -154,7 +152,6 @@ func New(cfg *config.Config, socket string) *Daemon {
 		sseHub:        NewSSEHub(),
 		heartbeat:     hb,
 		healthChecker: hc,
-		confirmGate:   security.NewGate(5 * time.Minute),
 		skillReg:      skillReg,
 		skillsRoot:    skillsRoot,
 		clawhub:       ch,
@@ -205,8 +202,6 @@ func New(cfg *config.Config, socket string) *Daemon {
 	d.mux.HandleFunc("GET /tasks/{id}", d.handleGetTask)
 	d.mux.HandleFunc("DELETE /tasks/{id}", d.handleCancelTask)
 	d.mux.HandleFunc("GET /tasks/{id}/logs", d.handleGetTaskLogs)
-	d.mux.HandleFunc("POST /tasks/{id}/approve", d.handleApproveTask)
-	d.mux.HandleFunc("POST /tasks/{id}/deny", d.handleDenyTask)
 	d.mux.HandleFunc("POST /memory", d.handleSaveMemory)
 	d.mux.HandleFunc("GET /memory", d.handleSearchMemory)
 	d.mux.HandleFunc("GET /memory/{id}", d.handleGetMemory)
@@ -998,31 +993,6 @@ func (d *Daemon) handleGcalDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// handleApproveTask handles POST /tasks/{id}/approve.
-// It signals the confirmation gate to approve the pending write action for the task.
-//
-// TODO: integrate gate.Request + gate.Wait into Gmail/Calendar write handlers so
-// that the full approval flow (Telegram notification → wait → execute) is enforced.
-func (d *Daemon) handleApproveTask(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := d.confirmGate.Approve(id); err != nil {
-		http.Error(w, `{"error":"no pending confirmation for this task"}`, http.StatusNotFound)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// handleDenyTask handles POST /tasks/{id}/deny.
-// It signals the confirmation gate to deny the pending write action for the task.
-func (d *Daemon) handleDenyTask(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := d.confirmGate.Deny(id); err != nil {
-		http.Error(w, `{"error":"no pending confirmation for this task"}`, http.StatusNotFound)
-		return
-	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -225,35 +225,7 @@ var logsCmd = &cobra.Command{
 	},
 }
 
-// --- approve / deny / gmail / gcal / memory / setup (stubs) ---
-
-var approveCmd = &cobra.Command{
-	Use:   "approve <task-id>",
-	Short: "Approve a pending confirmation for a task",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		c := newClient()
-		if err := c.ApproveTask(args[0]); err != nil {
-			return err
-		}
-		fmt.Printf("Task %s approved.\n", args[0])
-		return nil
-	},
-}
-
-var denyCmd = &cobra.Command{
-	Use:   "deny <task-id>",
-	Short: "Deny a pending confirmation for a task",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		c := newClient()
-		if err := c.DenyTask(args[0]); err != nil {
-			return err
-		}
-		fmt.Printf("Task %s denied.\n", args[0])
-		return nil
-	},
-}
+// --- gmail / gcal / memory / setup (stubs) ---
 
 var gmailCmd = &cobra.Command{
 	Use:   "gmail",
@@ -992,8 +964,6 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(cancelCmd)
 	rootCmd.AddCommand(logsCmd)
-	rootCmd.AddCommand(approveCmd)
-	rootCmd.AddCommand(denyCmd)
 	rootCmd.AddCommand(gmailCmd)
 	rootCmd.AddCommand(gcalCmd)
 	rootCmd.AddCommand(memoryCmd)

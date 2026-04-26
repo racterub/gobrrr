@@ -696,46 +696,6 @@ func (c *Client) GcalDeleteEventWithTaskID(eventID, account, taskID string) erro
 	return nil
 }
 
-// ApproveTask sends a confirmation approval for the task with the given ID.
-func (c *Client) ApproveTask(id string) error {
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/tasks/"+id+"/approve", nil)
-	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("POST /tasks/%s/approve: %w", id, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("no pending confirmation for task %q", id)
-	}
-	if resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("unexpected status %d from POST /tasks/%s/approve", resp.StatusCode, id)
-	}
-	return nil
-}
-
-// DenyTask sends a confirmation denial for the task with the given ID.
-func (c *Client) DenyTask(id string) error {
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/tasks/"+id+"/deny", nil)
-	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("POST /tasks/%s/deny: %w", id, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("no pending confirmation for task %q", id)
-	}
-	if resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("unexpected status %d from POST /tasks/%s/deny", resp.StatusCode, id)
-	}
-	return nil
-}
-
 // WaitForTask polls GetTask every 2 seconds until the task reaches a terminal
 // state (completed, failed, or cancelled). It returns the result string on
 // success, an error on failure/cancellation, or a descriptive error if the
