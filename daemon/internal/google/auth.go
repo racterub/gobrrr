@@ -43,7 +43,6 @@ type Account struct {
 // accountEntry is the per-account record stored in accounts.json.
 type accountEntry struct {
 	Email string `json:"email"`
-	Type  string `json:"type"`
 }
 
 // accountsIndex is the top-level structure of accounts.json.
@@ -294,6 +293,6 @@ func (am *AccountManager) updateIndex(name, email string) error {
 	if err != nil {
 		return err
 	}
-	idx.Accounts[name] = accountEntry{Email: email, Type: "oauth2"}
+	idx.Accounts[name] = accountEntry{Email: email}
 	return am.saveIndex(idx)
 }
