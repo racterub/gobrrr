@@ -155,36 +155,6 @@ The `channel/index.ts` Bun MCP process consumed all available memory (31GB) on t
 
 **Start by:** Write the package and tests first. Then migrate `daemon/queue.go` (well-tested, bounded scope) as the proof. Then sweep the rest.
 
-## Refactor #7 — Split `daemon.go` (1139 lines) by handler concern — 2026-04-26
-
-**What:** `daemon/internal/daemon/daemon.go` mixes lifecycle/ctor (1-241), health monitoring (319-395), task CRUD (397-489), memory routes (493-592), Gmail routes (594-776), Calendar routes (778-1002), session routes (1041-1091), and schedule routes (1095-1134). Route registration in `New` already groups by concern. Extract into `routes_tasks.go`, `routes_memory.go`, `routes_gmail.go`, `routes_gcal.go`, `routes_session.go`, `routes_schedule.go`. `daemon.go` itself shrinks to ~250 lines (struct, `New`, `Run`, route table).
-
-**Why:** 1139 lines is the single biggest readability tax in the daemon package. Reviewers, navigation, and future feature work all benefit. This is purely structural — file moves and `package daemon` decorations.
-
-**Files / docs:**
-- `daemon/internal/daemon/daemon.go` — source
-- New files: `daemon/internal/daemon/routes_tasks.go`, `routes_memory.go`, `routes_gmail.go`, `routes_gcal.go`, `routes_session.go`, `routes_schedule.go`
-- Test files do not need to move (they're already concern-specific in many cases, or shared in `daemon_test.go`).
-
-**Constraints:**
-- Single structural commit. Title: `refactor(daemon): split daemon.go by route concern`.
-- Zero behavior change. `go test ./...` must be green at the same SHA.
-- Do this BEFORE Refactor #5 (orphaned routes) and #9 (HTTP helpers) so subsequent diffs stay small. Or after — but pick one order; don't interleave.
-
-**Acceptance criteria:**
-- [ ] `daemon.go` ≤ 300 lines.
-- [ ] Each route group lives in its own `routes_*.go`.
-- [ ] All tests pass.
-- [ ] `go vet ./...` and the project's standard lint pass.
-
-**Out of scope:**
-- Subpackage extraction (`daemon/queue` as separate package). Bigger commit, may not be worth import-cycle pressure.
-- HTTP helper extraction (Refactor #9) — separate commit.
-
-**Estimated effort:** small-medium — mostly mechanical, ~30 minutes if no surprises.
-
-**Start by:** Run `go build ./...` to capture the green baseline. Move handler functions in one batch, keeping signatures identical. Re-run tests; iterate until green.
-
 ## Refactor #8 — Collapse `client.go` Gmail/Gcal duplicates + extract transport helpers — 2026-04-26
 
 **What:** `internal/client/client.go` is 912 lines because every Gmail/Gcal method exists as both `Foo` and `FooWithTaskID`, and only the `WithTaskID` variant is ever called (the bare `Foo` versions just call `FooWithTaskID(args, "")`). Delete the bare wrappers, rename `*WithTaskID` to the short name, pass `taskID=""` at the few call sites that don't care. Then extract `postJSON`/`getJSON`/`deleteResource` helpers — every Gmail/Gcal method follows the same marshal→NewRequest→Content-Type→optional X-Gobrrr-Task-ID→Do→status check→ReadAll→return shape (~9 copies of ~25 lines each).
