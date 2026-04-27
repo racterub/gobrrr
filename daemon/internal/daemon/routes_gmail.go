@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/racterub/gobrrr/internal/google"
@@ -40,17 +39,17 @@ type gmailReplyRequest struct {
 // or the Gmail service cannot be created.
 func (d *Daemon) requireGmail(w http.ResponseWriter, account string) google.GmailAPI {
 	if d.accountMgr == nil {
-		http.Error(w, `{"error":"Google accounts not configured"}`, http.StatusServiceUnavailable)
+		respondError(w, http.StatusServiceUnavailable, "Google accounts not configured")
 		return nil
 	}
 	httpClient, err := d.accountMgr.GetHTTPClient(account)
 	if err != nil {
-		http.Error(w, `{"error":"account not found or credentials unavailable"}`, http.StatusServiceUnavailable)
+		respondError(w, http.StatusServiceUnavailable, "account not found or credentials unavailable")
 		return nil
 	}
 	svc, err := google.NewGmailService(httpClient)
 	if err != nil {
-		http.Error(w, `{"error":"failed to create Gmail service"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to create Gmail service")
 		return nil
 	}
 	return svc
@@ -68,11 +67,11 @@ func (d *Daemon) checkWritePermission(w http.ResponseWriter, r *http.Request) bo
 	task, err := d.queue.Get(taskID)
 	if err != nil {
 		// Unknown task ID — deny to be safe.
-		http.Error(w, `{"error":"task not found"}`, http.StatusForbidden)
+		respondError(w, http.StatusForbidden, "task not found")
 		return false
 	}
 	if !task.AllowWrites {
-		http.Error(w, `{"error":"write operations not permitted for this task"}`, http.StatusForbidden)
+		respondError(w, http.StatusForbidden, "write operations not permitted for this task")
 		return false
 	}
 	return true
@@ -80,12 +79,12 @@ func (d *Daemon) checkWritePermission(w http.ResponseWriter, r *http.Request) bo
 
 func (d *Daemon) handleGmailList(w http.ResponseWriter, r *http.Request) {
 	var req gmailListRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Account == "" {
-		http.Error(w, `{"error":"account is required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "account is required")
 		return
 	}
 
@@ -96,25 +95,24 @@ func (d *Daemon) handleGmailList(w http.ResponseWriter, r *http.Request) {
 
 	msgs, err := svc.ListMessages(req.Query, req.MaxResults)
 	if err != nil {
-		http.Error(w, `{"error":"failed to list messages"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to list messages")
 		return
 	}
 	if msgs == nil {
 		msgs = []*google.MessageSummary{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(msgs) //nolint:errcheck
+	respondJSON(w, http.StatusOK, msgs)
 }
 
 func (d *Daemon) handleGmailRead(w http.ResponseWriter, r *http.Request) {
 	var req gmailReadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.MessageID == "" || req.Account == "" {
-		http.Error(w, `{"error":"message_id and account are required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "message_id and account are required")
 		return
 	}
 
@@ -125,12 +123,11 @@ func (d *Daemon) handleGmailRead(w http.ResponseWriter, r *http.Request) {
 
 	detail, err := svc.ReadMessage(req.MessageID)
 	if err != nil {
-		http.Error(w, `{"error":"failed to read message"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to read message")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(detail) //nolint:errcheck
+	respondJSON(w, http.StatusOK, detail)
 }
 
 func (d *Daemon) handleGmailSend(w http.ResponseWriter, r *http.Request) {
@@ -139,12 +136,12 @@ func (d *Daemon) handleGmailSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req gmailSendRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.To == "" || req.Account == "" {
-		http.Error(w, `{"error":"to and account are required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "to and account are required")
 		return
 	}
 
@@ -154,7 +151,7 @@ func (d *Daemon) handleGmailSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := svc.SendMessage(req.To, req.Subject, req.Body); err != nil {
-		http.Error(w, `{"error":"failed to send message"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to send message")
 		return
 	}
 
@@ -167,12 +164,12 @@ func (d *Daemon) handleGmailReply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req gmailReplyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.MessageID == "" || req.Account == "" {
-		http.Error(w, `{"error":"message_id and account are required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "message_id and account are required")
 		return
 	}
 
@@ -182,7 +179,7 @@ func (d *Daemon) handleGmailReply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := svc.ReplyMessage(req.MessageID, req.Body); err != nil {
-		http.Error(w, `{"error":"failed to send reply"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to send reply")
 		return
 	}
 

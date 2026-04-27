@@ -1,8 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/racterub/gobrrr/internal/scheduler"
@@ -16,18 +14,16 @@ func (d *Daemon) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 		ReplyTo     string `json:"reply_to"`
 		AllowWrites bool   `json:"allow_writes"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	sched, err := d.scheduler.Create(req.Name, req.Cron, req.Prompt, req.ReplyTo, req.AllowWrites)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(sched) //nolint:errcheck
+	respondJSON(w, http.StatusCreated, sched)
 }
 
 func (d *Daemon) handleListSchedules(w http.ResponseWriter, r *http.Request) {
@@ -35,16 +31,14 @@ func (d *Daemon) handleListSchedules(w http.ResponseWriter, r *http.Request) {
 	if schedules == nil {
 		schedules = []*scheduler.Schedule{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(schedules) //nolint:errcheck
+	respondJSON(w, http.StatusOK, schedules)
 }
 
 func (d *Daemon) handleRemoveSchedule(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if err := d.scheduler.Remove(name); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusNotFound)
+		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "removed"}) //nolint:errcheck
+	respondJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }

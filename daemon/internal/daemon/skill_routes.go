@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -32,7 +31,7 @@ func (d *Daemon) handleSkillsSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	writeSkillJSON(w, results)
+	respondJSON(w, http.StatusOK, results)
 }
 
 type installReq struct {
@@ -42,7 +41,7 @@ type installReq struct {
 
 func (d *Daemon) handleSkillsInstall(w http.ResponseWriter, r *http.Request) {
 	var body installReq
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := decodeJSON(r, &body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -72,7 +71,7 @@ func (d *Daemon) handleSkillsInstall(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeSkillJSON(w, map[string]any{
+	respondJSON(w, http.StatusOK, map[string]any{
 		"request_id": approval.ID,
 		"request":    installReq, // CLI card still expects this shape
 	})
@@ -100,17 +99,11 @@ func (d *Daemon) handleSkillsUninstall(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "uninstalled %s\n", slug)
 }
 
-func writeSkillJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
-}
-
 func (d *Daemon) handleListSkills(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
 	if d.skillReg == nil {
-		_ = json.NewEncoder(w).Encode([]skills.Skill{})
+		respondJSON(w, http.StatusOK, []skills.Skill{})
 		return
 	}
 	list := d.skillReg.List()
-	_ = json.NewEncoder(w).Encode(list)
+	respondJSON(w, http.StatusOK, list)
 }

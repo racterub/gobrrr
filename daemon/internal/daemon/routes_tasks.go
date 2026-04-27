@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,12 +21,12 @@ type submitTaskRequest struct {
 
 func (d *Daemon) handleSubmitTask(w http.ResponseWriter, r *http.Request) {
 	var req submitTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Prompt == "" {
-		http.Error(w, `{"error":"prompt is required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "prompt is required")
 		return
 	}
 	if req.TimeoutSec == 0 {
@@ -36,13 +35,11 @@ func (d *Daemon) handleSubmitTask(w http.ResponseWriter, r *http.Request) {
 
 	task, err := d.queue.Submit(req.Prompt, req.ReplyTo, req.Priority, req.AllowWrites, req.TimeoutSec, req.Warm)
 	if err != nil {
-		http.Error(w, `{"error":"failed to submit task"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to submit task")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(task) //nolint:errcheck
+	respondJSON(w, http.StatusCreated, task)
 }
 
 func (d *Daemon) handleListTasks(w http.ResponseWriter, r *http.Request) {
@@ -52,30 +49,27 @@ func (d *Daemon) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		tasks = []*Task{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tasks) //nolint:errcheck
+	respondJSON(w, http.StatusOK, tasks)
 }
 
 func (d *Daemon) handleGetTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	task, err := d.queue.Get(id)
 	if err != nil {
-		http.Error(w, `{"error":"task not found"}`, http.StatusNotFound)
+		respondError(w, http.StatusNotFound, "task not found")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(task) //nolint:errcheck
+	respondJSON(w, http.StatusOK, task)
 }
 
 func (d *Daemon) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := d.queue.Cancel(id); err != nil {
-		http.Error(w, `{"error":"task not found"}`, http.StatusNotFound)
+		respondError(w, http.StatusNotFound, "task not found")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -83,7 +77,7 @@ func (d *Daemon) handleGetTaskLogs(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	// Sanitize: reject IDs containing path separators.
 	if strings.ContainsAny(id, "/\\") {
-		http.Error(w, `{"error":"invalid task id"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid task id")
 		return
 	}
 
@@ -91,10 +85,10 @@ func (d *Daemon) handleGetTaskLogs(w http.ResponseWriter, r *http.Request) {
 	data, err := os.ReadFile(logPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			http.Error(w, `{"error":"log not found"}`, http.StatusNotFound)
+			respondError(w, http.StatusNotFound, "log not found")
 			return
 		}
-		http.Error(w, `{"error":"failed to read log"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to read log")
 		return
 	}
 

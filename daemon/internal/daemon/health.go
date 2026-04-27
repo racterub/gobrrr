@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -86,7 +85,5 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 		WarmWorkers:   warmStatus{Total: total, Ready: ready, Busy: busy, Disabled: disabled},
 		Models:        d.cfg.Models,
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	respondJSON(w, http.StatusOK, resp)
 }

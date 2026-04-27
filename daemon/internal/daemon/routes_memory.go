@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,24 +16,22 @@ type saveMemoryRequest struct {
 
 func (d *Daemon) handleSaveMemory(w http.ResponseWriter, r *http.Request) {
 	var req saveMemoryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Content == "" {
-		http.Error(w, `{"error":"content is required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "content is required")
 		return
 	}
 
 	entry, err := d.memStore.Save(req.Content, req.Tags, req.Source)
 	if err != nil {
-		http.Error(w, `{"error":"failed to save memory"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to save memory")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(entry) //nolint:errcheck
+	respondJSON(w, http.StatusCreated, entry)
 }
 
 func (d *Daemon) handleSearchMemory(w http.ResponseWriter, r *http.Request) {
@@ -67,43 +64,41 @@ func (d *Daemon) handleSearchMemory(w http.ResponseWriter, r *http.Request) {
 		entries, err = d.memStore.List(limit)
 	}
 	if err != nil {
-		http.Error(w, `{"error":"failed to search memory"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to search memory")
 		return
 	}
 	if entries == nil {
 		entries = []*memory.Entry{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entries) //nolint:errcheck
+	respondJSON(w, http.StatusOK, entries)
 }
 
 func (d *Daemon) handleGetMemory(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if strings.ContainsAny(id, "/\\") {
-		http.Error(w, `{"error":"invalid memory id"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid memory id")
 		return
 	}
 
 	entry, err := d.memStore.Get(id)
 	if err != nil {
-		http.Error(w, `{"error":"memory not found"}`, http.StatusNotFound)
+		respondError(w, http.StatusNotFound, "memory not found")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entry) //nolint:errcheck
+	respondJSON(w, http.StatusOK, entry)
 }
 
 func (d *Daemon) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if strings.ContainsAny(id, "/\\") {
-		http.Error(w, `{"error":"invalid memory id"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "invalid memory id")
 		return
 	}
 
 	if err := d.memStore.Delete(id); err != nil {
-		http.Error(w, `{"error":"failed to delete memory"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to delete memory")
 		return
 	}
 

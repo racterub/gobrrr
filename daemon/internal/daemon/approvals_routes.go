@@ -16,7 +16,7 @@ func approvalDecisionHandler(d *ApprovalDispatcher) http.HandlerFunc {
 		var body struct {
 			Decision string `json:"decision"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := decodeJSON(r, &body); err != nil {
 			http.Error(w, "invalid JSON body", http.StatusBadRequest)
 			return
 		}

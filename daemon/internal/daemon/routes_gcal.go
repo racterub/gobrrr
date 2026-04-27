@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/racterub/gobrrr/internal/google"
@@ -47,17 +46,17 @@ type gcalDeleteRequest struct {
 // configured or the Calendar service cannot be created.
 func (d *Daemon) requireCalendar(w http.ResponseWriter, account string) google.CalendarAPI {
 	if d.accountMgr == nil {
-		http.Error(w, `{"error":"Google accounts not configured"}`, http.StatusServiceUnavailable)
+		respondError(w, http.StatusServiceUnavailable, "Google accounts not configured")
 		return nil
 	}
 	httpClient, err := d.accountMgr.GetHTTPClient(account)
 	if err != nil {
-		http.Error(w, `{"error":"account not found or credentials unavailable"}`, http.StatusServiceUnavailable)
+		respondError(w, http.StatusServiceUnavailable, "account not found or credentials unavailable")
 		return nil
 	}
 	svc, err := google.NewCalendarService(httpClient)
 	if err != nil {
-		http.Error(w, `{"error":"failed to create Calendar service"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to create Calendar service")
 		return nil
 	}
 	return svc
@@ -65,12 +64,12 @@ func (d *Daemon) requireCalendar(w http.ResponseWriter, account string) google.C
 
 func (d *Daemon) handleGcalToday(w http.ResponseWriter, r *http.Request) {
 	var req gcalAccountRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Account == "" {
-		http.Error(w, `{"error":"account is required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "account is required")
 		return
 	}
 
@@ -81,25 +80,24 @@ func (d *Daemon) handleGcalToday(w http.ResponseWriter, r *http.Request) {
 
 	events, err := svc.Today()
 	if err != nil {
-		http.Error(w, `{"error":"failed to list today's events"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to list today's events")
 		return
 	}
 	if events == nil {
 		events = []*google.EventSummary{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(events) //nolint:errcheck
+	respondJSON(w, http.StatusOK, events)
 }
 
 func (d *Daemon) handleGcalWeek(w http.ResponseWriter, r *http.Request) {
 	var req gcalAccountRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Account == "" {
-		http.Error(w, `{"error":"account is required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "account is required")
 		return
 	}
 
@@ -110,25 +108,24 @@ func (d *Daemon) handleGcalWeek(w http.ResponseWriter, r *http.Request) {
 
 	events, err := svc.Week()
 	if err != nil {
-		http.Error(w, `{"error":"failed to list week's events"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to list week's events")
 		return
 	}
 	if events == nil {
 		events = []*google.EventSummary{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(events) //nolint:errcheck
+	respondJSON(w, http.StatusOK, events)
 }
 
 func (d *Daemon) handleGcalGet(w http.ResponseWriter, r *http.Request) {
 	var req gcalGetRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.EventID == "" || req.Account == "" {
-		http.Error(w, `{"error":"event_id and account are required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "event_id and account are required")
 		return
 	}
 
@@ -139,12 +136,11 @@ func (d *Daemon) handleGcalGet(w http.ResponseWriter, r *http.Request) {
 
 	detail, err := svc.GetEvent(req.EventID)
 	if err != nil {
-		http.Error(w, `{"error":"failed to get event"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to get event")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(detail) //nolint:errcheck
+	respondJSON(w, http.StatusOK, detail)
 }
 
 func (d *Daemon) handleGcalCreate(w http.ResponseWriter, r *http.Request) {
@@ -153,12 +149,12 @@ func (d *Daemon) handleGcalCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req gcalCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.Title == "" || req.Account == "" {
-		http.Error(w, `{"error":"title and account are required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "title and account are required")
 		return
 	}
 
@@ -168,7 +164,7 @@ func (d *Daemon) handleGcalCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := svc.CreateEvent(req.Title, req.Start, req.End, req.Description); err != nil {
-		http.Error(w, `{"error":"failed to create event"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to create event")
 		return
 	}
 
@@ -181,12 +177,12 @@ func (d *Daemon) handleGcalUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req gcalUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.EventID == "" || req.Account == "" {
-		http.Error(w, `{"error":"event_id and account are required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "event_id and account are required")
 		return
 	}
 
@@ -196,7 +192,7 @@ func (d *Daemon) handleGcalUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := svc.UpdateEvent(req.EventID, req.Title, req.Start, req.End); err != nil {
-		http.Error(w, `{"error":"failed to update event"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to update event")
 		return
 	}
 
@@ -209,12 +205,12 @@ func (d *Daemon) handleGcalDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req gcalDeleteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.EventID == "" || req.Account == "" {
-		http.Error(w, `{"error":"event_id and account are required"}`, http.StatusBadRequest)
+		respondError(w, http.StatusBadRequest, "event_id and account are required")
 		return
 	}
 
@@ -224,7 +220,7 @@ func (d *Daemon) handleGcalDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := svc.DeleteEvent(req.EventID); err != nil {
-		http.Error(w, `{"error":"failed to delete event"}`, http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "failed to delete event")
 		return
 	}
 
