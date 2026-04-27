@@ -186,44 +186,6 @@ The `channel/index.ts` Bun MCP process consumed all available memory (31GB) on t
 
 **Start by:** Confirm via grep that no `Foo` (non-WithTaskID) variant has callers. Delete the wrappers as commit 1. Then extract the helpers as commit 2.
 
-## Refactor #9 — Add `decodeJSON` / `respondJSON` / `respondError` helpers in daemon — 2026-04-26
-
-**What:** `daemon.go` (and its post-split siblings) contains ~85 `json.NewDecoder`/`json.NewEncoder` calls and ~22 inline `http.Error(w, '{"error":"..."}'`, statusCode)` strings — every handler reimplements the same envelope. Extract into `daemon/internal/daemon/http_helpers.go`:
-
-```go
-func decodeJSON(r *http.Request, dst any) error
-func respondJSON(w http.ResponseWriter, status int, v any)
-func respondError(w http.ResponseWriter, status int, msg string)
-```
-
-Sweep all handlers to use them.
-
-**Why:** ~150 lines removed; consistent error envelope; one place to add e.g. `Content-Type: application/json` enforcement; eliminates the `//nolint:errcheck` noise.
-
-**Files / docs:**
-- New: `daemon/internal/daemon/http_helpers.go`
-- All `daemon/internal/daemon/*.go` route handlers
-- Concrete examples to match: `handleGmailList`, `handleGmailRead`, `handleGmailSend`, `handleGmailReply` in `routes_gmail.go` (after Refactor #7)
-
-**Constraints:**
-- Do AFTER Refactor #7 (daemon.go split) so the diff isn't a 1100-line monster.
-- Keep error response shape identical (`{"error":"<msg>"}`).
-- Pure structural change.
-
-**Acceptance criteria:**
-- [ ] `http_helpers.go` exists with the three functions.
-- [ ] Zero `json.NewDecoder` and zero `json.NewEncoder` in route handlers (verified by grep — they should only appear in helpers + tests).
-- [ ] No inline `http.Error(...err...)` strings.
-- [ ] All tests pass.
-
-**Out of scope:**
-- Adding middleware (auth, logging) — separate concern.
-- Migrating to a router framework — the project intentionally uses stdlib.
-
-**Estimated effort:** small-medium — once helpers exist, the sweep is mechanical.
-
-**Start by:** Write the helpers + a unit test. Then convert one handler (`handleGmailList`) end-to-end as proof. Then sweep.
-
 ## Refactor #10 — Split `cmd/gobrrr/main.go` (1060 lines) by verb + standardize flag style — 2026-04-26
 
 **What:** `cmd/gobrrr/main.go` contains every cobra command (daemon, task, gmail, gcal, memory, session, timer, skill, setup) inline. Split into `cmd/gobrrr/{daemon,task,gmail,gcal,memory,session,timer,skill,setup}.go`, each owning a `func register<Verb>(root *cobra.Command)`. `main.go` shrinks to ~50 lines (entrypoint, root cmd, init calling registers). Also: standardize on `cmd.Flags().GetString("name")` (already used by `timer`) — drop the 30+ package-global flag vars (`gmailListUnread`, etc.) used elsewhere.
