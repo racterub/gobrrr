@@ -25,8 +25,6 @@ type Task struct {
 	CreatedAt   time.Time         `json:"created_at"`
 	StartedAt   *time.Time        `json:"started_at"`
 	CompletedAt *time.Time        `json:"completed_at"`
-	Retries     int               `json:"retries"`
-	MaxRetries  int               `json:"max_retries"`
 	TimeoutSec  int               `json:"timeout_sec"`
 	Result      *string           `json:"result"`
 	Error       *string           `json:"error"`
