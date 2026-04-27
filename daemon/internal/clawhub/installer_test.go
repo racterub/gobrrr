@@ -54,7 +54,6 @@ body
 	installReq, err := inst.Stage(pkg)
 	require.NoError(t, err)
 	require.NotNil(t, installReq)
-	require.NotEmpty(t, installReq.RequestID)
 
 	assert.Equal(t, "github", installReq.Slug)
 	assert.Equal(t, "1.4.2", installReq.Version)
@@ -74,8 +73,6 @@ body
 	assert.True(t, found, "a proposed command must supply the missing gh binary")
 
 	assert.FileExists(t, filepath.Join(installReq.StagingDir, "SKILL.md"))
-	assert.False(t, installReq.ExpiresAt.IsZero())
-	assert.True(t, installReq.ExpiresAt.After(installReq.CreatedAt))
 }
 
 func TestInstaller_SourceURL_FallsBackToAPIWhenHandleMissing(t *testing.T) {

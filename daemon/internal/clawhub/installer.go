@@ -20,10 +20,6 @@ import (
 // pass a wrapper around exec.LookPath; tests inject a fake.
 type BinChecker func(bin string) bool
 
-// requestTTL is how long an approval proposal stays valid. After this window
-// the staging dir and request file are safe to garbage-collect.
-const requestTTL = 24 * time.Hour
-
 // Decompression bomb defense constants.
 const (
 	maxZipEntryBytes = 10 << 20  // 10 MiB per file
@@ -94,9 +90,7 @@ func (in *Installer) Stage(pkg *SkillPackage) (*InstallRequest, error) {
 	}
 	proposed := proposeCommands(fm, missing)
 
-	now := time.Now().UTC()
 	return &InstallRequest{
-		RequestID:        reqID,
 		Slug:             pkg.Slug,
 		Version:          pkg.Version,
 		SourceURL:        in.composeSourceURL(pkg.OwnerHandle, pkg.Slug, pkg.Version),
@@ -105,8 +99,6 @@ func (in *Installer) Stage(pkg *SkillPackage) (*InstallRequest, error) {
 		Frontmatter:      *fm,
 		MissingBins:      missing,
 		ProposedCommands: proposed,
-		CreatedAt:        now,
-		ExpiresAt:        now.Add(requestTTL),
 	}, nil
 }
 

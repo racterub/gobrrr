@@ -30,9 +30,8 @@ func TestSkillInstallHandler_Approve(t *testing.T) {
 	h := &skillInstallHandler{committer: fc}
 
 	installReq := clawhub.InstallRequest{
-		RequestID: "abcd",
-		Slug:      "foo",
-		Version:   "1.0.0",
+		Slug:    "foo",
+		Version: "1.0.0",
 	}
 	raw, _ := json.Marshal(installReq)
 
@@ -53,7 +52,7 @@ func TestSkillInstallHandler_Approve(t *testing.T) {
 func TestSkillInstallHandler_SkipBinary(t *testing.T) {
 	fc := &fakeCommitter{}
 	h := &skillInstallHandler{committer: fc}
-	raw, _ := json.Marshal(clawhub.InstallRequest{RequestID: "abcd"})
+	raw, _ := json.Marshal(clawhub.InstallRequest{})
 	require.NoError(t, h.Handle(&ApprovalRequest{Payload: raw}, "skip_binary"))
 	assert.True(t, fc.approved)
 	assert.True(t, fc.skipBinary)
@@ -62,7 +61,7 @@ func TestSkillInstallHandler_SkipBinary(t *testing.T) {
 func TestSkillInstallHandler_Deny_CleansUp(t *testing.T) {
 	fc := &fakeCommitter{}
 	h := &skillInstallHandler{committer: fc}
-	raw, _ := json.Marshal(clawhub.InstallRequest{RequestID: "abcd"})
+	raw, _ := json.Marshal(clawhub.InstallRequest{})
 	require.NoError(t, h.Handle(&ApprovalRequest{Payload: raw}, "deny"))
 	assert.False(t, fc.approved)
 }

@@ -5,8 +5,6 @@
 package clawhub
 
 import (
-	"time"
-
 	"github.com/racterub/gobrrr/internal/skills"
 )
 
@@ -79,7 +77,6 @@ type SkillPackage struct {
 // approval. A human-in-the-loop Telegram confirmation consumes this; the
 // downstream commit step reads it back to execute the install.
 type InstallRequest struct {
-	RequestID        string             `json:"request_id"`
 	Slug             string             `json:"slug"`
 	Version          string             `json:"version"`
 	SourceURL        string             `json:"source_url"`
@@ -88,8 +85,6 @@ type InstallRequest struct {
 	Frontmatter      skills.Frontmatter `json:"frontmatter"`
 	MissingBins      []string           `json:"missing_bins"`
 	ProposedCommands []ProposedCommand  `json:"proposed_commands"`
-	CreatedAt        time.Time          `json:"created_at"`
-	ExpiresAt        time.Time          `json:"expires_at"`
 }
 
 // ProposedCommand is one "install this missing binary with this command"

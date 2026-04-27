@@ -18,7 +18,6 @@ func TestCommit_SkipBinaryPath(t *testing.T) {
 
 	// Stage a simple install request by hand.
 	req := &InstallRequest{
-		RequestID:  "abcd",
 		Slug:       "noop",
 		Version:    "1.0.0",
 		SourceURL:  "https://clawhub.com/noop",
@@ -73,7 +72,6 @@ func TestCommit_Deny_CleansStaging(t *testing.T) {
 	require.NoError(t, os.MkdirAll(stagingDir, 0700))
 
 	req := InstallRequest{
-		RequestID:  "abcd",
 		StagingDir: stagingDir,
 	}
 
@@ -90,7 +88,6 @@ func TestCommit_ApproveRunsBinaryAndRecords(t *testing.T) {
 
 	// Stage an install request with a proposed command.
 	req := &InstallRequest{
-		RequestID:  "req1",
 		Slug:       "gh-tool",
 		Version:    "1.0.0",
 		SourceURL:  "https://clawhub.com/gh-tool",
@@ -169,7 +166,6 @@ func TestCommit_CommandFailureReturnsError(t *testing.T) {
 
 	// Stage an install request with a proposed command.
 	req := &InstallRequest{
-		RequestID:  "req2",
 		Slug:       "broken-tool",
 		Version:    "1.0.0",
 		SourceURL:  "https://clawhub.com/broken-tool",
