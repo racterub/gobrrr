@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"time"
+
+	"github.com/racterub/gobrrr/internal/skills"
 )
 
 var validSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]*$`)
 
 func (d *Daemon) registerSkillRoutes() {
+	d.mux.HandleFunc("GET /skills", d.handleListSkills)
 	d.mux.HandleFunc("GET /skills/search", d.handleSkillsSearch)
 	d.mux.HandleFunc("POST /skills/install", d.handleSkillsInstall)
 	d.mux.HandleFunc("DELETE /skills/{slug}", d.handleSkillsUninstall)
@@ -100,4 +103,14 @@ func (d *Daemon) handleSkillsUninstall(w http.ResponseWriter, r *http.Request) {
 func writeSkillJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func (d *Daemon) handleListSkills(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if d.skillReg == nil {
+		_ = json.NewEncoder(w).Encode([]skills.Skill{})
+		return
+	}
+	list := d.skillReg.List()
+	_ = json.NewEncoder(w).Encode(list)
 }
