@@ -347,41 +347,6 @@ Sweep all handlers to use them.
 
 **Start by:** Write the false-positive test cases first (fail today). Then propose the narrowed pattern set in a design comment in `sanitize.go`. Then implement.
 
-## Refactor #13 — Drop pre-migration cruft fields — 2026-04-26
-
-**What:** Several struct fields are vestigial after recent migrations and are silently serialized to disk:
-- `Task.Retries` and `Task.MaxRetries` (`daemon/queue.go:17-35`) — never set anywhere.
-- `InstallRequest.RequestID`, `CreatedAt`, `ExpiresAt` (`clawhub/types.go:82, 91-92`) — pre-generic-approval; comment in installer says "Stage no longer writes the request JSON to disk."
-- `accountEntry.Type` (`google/auth.go:285`) — written but never read.
-
-Delete them. Existing on-disk files will keep loading (extra fields ignored on unmarshal); subsequent writes drop them.
-
-**Why:** Confusing for readers ("which ID is canonical, RequestID or the approval ID?"). Also technical debt that ages: future-Claude sees the field and assumes it's load-bearing.
-
-**Files / docs:**
-- `daemon/internal/daemon/queue.go:17-35` — Task struct
-- `daemon/internal/clawhub/types.go:82, 91-92` — InstallRequest
-- `daemon/internal/clawhub/installer.go:99` — only writer of `RequestID`
-- `daemon/internal/google/auth.go:285` — accountEntry.Type
-
-**Constraints:**
-- Single behavioral commit per struct (so any regression is easy to bisect).
-- Verify no test reads the dropped fields (grep + `go test ./...`).
-- Do AFTER Refactor #5 (orphaned routes) since `Task` may be touched.
-
-**Acceptance criteria:**
-- [ ] Three struct definitions cleaned.
-- [ ] No test references the dropped fields.
-- [ ] Loading a queue.json or InstallRequest.json with the old fields still works (extra fields are tolerated).
-
-**Out of scope:**
-- Renaming `RequestID` to `StagingID` — just delete it; the staging dir name is derivable from the approval ID.
-- Schema versioning (the project tolerates schema drift via `json:"-"` tolerance).
-
-**Estimated effort:** small — ~30 lines deleted.
-
-**Start by:** Grep each field name for any read site. Delete in three small commits.
-
 ## Refactor #14 — Switch task/memory ID generators from `math/rand` to `crypto/rand` — 2026-04-26
 
 **What:** `daemon/queue.go:7,420-427` uses `math/rand` for task IDs (6 hex chars + unix-second timestamp). `memory/store.go:189-196` uses `math/rand` for entry IDs. Vault and approvals already use `crypto/rand`. Both task and memory IDs are user-visible and concurrency-active; collisions on burst submission are not impossible (1/16M for 6-hex on same timestamp). Predictability is also a minor weakness (default-seeded `math/rand` is deterministic per-process).
