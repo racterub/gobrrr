@@ -283,7 +283,7 @@ var gmailListCmd = &cobra.Command{
 			query = "is:unread " + query
 		}
 		c := newClient()
-		result, err := c.GmailListWithTaskID(query, gmailListLimit, gmailListAccount, os.Getenv("GOBRRR_TASK_ID"))
+		result, err := c.GmailList(query, gmailListLimit, gmailListAccount, os.Getenv("GOBRRR_TASK_ID"))
 		if err != nil {
 			return err
 		}
@@ -301,7 +301,7 @@ var gmailReadCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := newClient()
-		result, err := c.GmailReadWithTaskID(args[0], gmailReadAccount, os.Getenv("GOBRRR_TASK_ID"))
+		result, err := c.GmailRead(args[0], gmailReadAccount, os.Getenv("GOBRRR_TASK_ID"))
 		if err != nil {
 			return err
 		}
@@ -326,7 +326,7 @@ var gmailSendCmd = &cobra.Command{
 			return fmt.Errorf("--to is required")
 		}
 		c := newClient()
-		if err := c.GmailSendWithTaskID(gmailSendTo, gmailSendSubject, gmailSendBody, gmailSendAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
+		if err := c.GmailSend(gmailSendTo, gmailSendSubject, gmailSendBody, gmailSendAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
 			return err
 		}
 		fmt.Println("Message sent.")
@@ -349,7 +349,7 @@ var gmailReplyCmd = &cobra.Command{
 			return fmt.Errorf("--body is required")
 		}
 		c := newClient()
-		if err := c.GmailReplyWithTaskID(args[0], gmailReplyBody, gmailReplyAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
+		if err := c.GmailReply(args[0], gmailReplyBody, gmailReplyAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
 			return err
 		}
 		fmt.Println("Reply sent.")
@@ -370,7 +370,7 @@ var gcalTodayCmd = &cobra.Command{
 	Short: "List today's calendar events",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := newClient()
-		result, err := c.GcalTodayWithTaskID(gcalTodayAccount, os.Getenv("GOBRRR_TASK_ID"))
+		result, err := c.GcalToday(gcalTodayAccount, os.Getenv("GOBRRR_TASK_ID"))
 		if err != nil {
 			return err
 		}
@@ -387,7 +387,7 @@ var gcalWeekCmd = &cobra.Command{
 	Short: "List this week's calendar events",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := newClient()
-		result, err := c.GcalWeekWithTaskID(gcalWeekAccount, os.Getenv("GOBRRR_TASK_ID"))
+		result, err := c.GcalWeek(gcalWeekAccount, os.Getenv("GOBRRR_TASK_ID"))
 		if err != nil {
 			return err
 		}
@@ -405,7 +405,7 @@ var gcalGetCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := newClient()
-		result, err := c.GcalGetEventWithTaskID(args[0], gcalGetAccount, os.Getenv("GOBRRR_TASK_ID"))
+		result, err := c.GcalGetEvent(args[0], gcalGetAccount, os.Getenv("GOBRRR_TASK_ID"))
 		if err != nil {
 			return err
 		}
@@ -431,7 +431,7 @@ var gcalCreateCmd = &cobra.Command{
 			return fmt.Errorf("--title is required")
 		}
 		c := newClient()
-		if err := c.GcalCreateEventWithTaskID(gcalCreateTitle, gcalCreateStart, gcalCreateEnd, gcalCreateDescription, gcalCreateAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
+		if err := c.GcalCreateEvent(gcalCreateTitle, gcalCreateStart, gcalCreateEnd, gcalCreateDescription, gcalCreateAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
 			return err
 		}
 		fmt.Println("Event created.")
@@ -453,7 +453,7 @@ var gcalUpdateCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := newClient()
-		if err := c.GcalUpdateEventWithTaskID(args[0], gcalUpdateTitle, gcalUpdateStart, gcalUpdateEnd, gcalUpdateAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
+		if err := c.GcalUpdateEvent(args[0], gcalUpdateTitle, gcalUpdateStart, gcalUpdateEnd, gcalUpdateAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
 			return err
 		}
 		fmt.Println("Event updated.")
@@ -470,7 +470,7 @@ var gcalDeleteCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := newClient()
-		if err := c.GcalDeleteEventWithTaskID(args[0], gcalDeleteAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
+		if err := c.GcalDeleteEvent(args[0], gcalDeleteAccount, os.Getenv("GOBRRR_TASK_ID")); err != nil {
 			return err
 		}
 		fmt.Printf("Event %s deleted.\n", args[0])

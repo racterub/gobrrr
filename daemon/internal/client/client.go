@@ -310,13 +310,10 @@ type gmailReplyRequest struct {
 }
 
 // GmailList fetches a list of messages matching query for the given account.
-// It returns the raw JSON response body as a string.
-func (c *Client) GmailList(query string, maxResults int, account string) (string, error) {
-	return c.GmailListWithTaskID(query, maxResults, account, "")
-}
-
-// GmailListWithTaskID is like GmailList but attaches an X-Gobrrr-Task-ID header.
-func (c *Client) GmailListWithTaskID(query string, maxResults int, account, taskID string) (string, error) {
+// If taskID is non-empty it is sent as the X-Gobrrr-Task-ID header so the
+// daemon can attribute the call to a specific task. It returns the raw JSON
+// response body as a string.
+func (c *Client) GmailList(query string, maxResults int, account, taskID string) (string, error) {
 	body := gmailListRequest{Query: query, MaxResults: maxResults, Account: account}
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -346,13 +343,9 @@ func (c *Client) GmailListWithTaskID(query string, maxResults int, account, task
 }
 
 // GmailRead fetches the full content of a message by ID for the given account.
-// It returns the raw JSON response body as a string.
-func (c *Client) GmailRead(messageID, account string) (string, error) {
-	return c.GmailReadWithTaskID(messageID, account, "")
-}
-
-// GmailReadWithTaskID is like GmailRead but attaches an X-Gobrrr-Task-ID header.
-func (c *Client) GmailReadWithTaskID(messageID, account, taskID string) (string, error) {
+// If taskID is non-empty it is sent as the X-Gobrrr-Task-ID header. It returns
+// the raw JSON response body as a string.
+func (c *Client) GmailRead(messageID, account, taskID string) (string, error) {
 	body := gmailReadRequest{MessageID: messageID, Account: account}
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -381,13 +374,9 @@ func (c *Client) GmailReadWithTaskID(messageID, account, taskID string) (string,
 	return string(raw), nil
 }
 
-// GmailSend sends an email via the daemon.
-func (c *Client) GmailSend(to, subject, body, account string) error {
-	return c.GmailSendWithTaskID(to, subject, body, account, "")
-}
-
-// GmailSendWithTaskID is like GmailSend but attaches an X-Gobrrr-Task-ID header.
-func (c *Client) GmailSendWithTaskID(to, subject, body, account, taskID string) error {
+// GmailSend sends an email via the daemon. If taskID is non-empty it is sent
+// as the X-Gobrrr-Task-ID header so the daemon can enforce write authorization.
+func (c *Client) GmailSend(to, subject, body, account, taskID string) error {
 	reqBody := gmailSendRequest{To: to, Subject: subject, Body: body, Account: account}
 	data, err := json.Marshal(reqBody)
 	if err != nil {
@@ -415,13 +404,10 @@ func (c *Client) GmailSendWithTaskID(to, subject, body, account, taskID string) 
 	return nil
 }
 
-// GmailReply sends a reply to the given message via the daemon.
-func (c *Client) GmailReply(messageID, body, account string) error {
-	return c.GmailReplyWithTaskID(messageID, body, account, "")
-}
-
-// GmailReplyWithTaskID is like GmailReply but attaches an X-Gobrrr-Task-ID header.
-func (c *Client) GmailReplyWithTaskID(messageID, body, account, taskID string) error {
+// GmailReply sends a reply to the given message via the daemon. If taskID is
+// non-empty it is sent as the X-Gobrrr-Task-ID header so the daemon can
+// enforce write authorization.
+func (c *Client) GmailReply(messageID, body, account, taskID string) error {
 	reqBody := gmailReplyRequest{MessageID: messageID, Body: body, Account: account}
 	data, err := json.Marshal(reqBody)
 	if err != nil {
@@ -486,14 +472,10 @@ type gcalDeleteRequest struct {
 	Account string `json:"account"`
 }
 
-// GcalToday fetches today's calendar events for the given account.
-// It returns the raw JSON response body as a string.
-func (c *Client) GcalToday(account string) (string, error) {
-	return c.GcalTodayWithTaskID(account, "")
-}
-
-// GcalTodayWithTaskID is like GcalToday but attaches an X-Gobrrr-Task-ID header.
-func (c *Client) GcalTodayWithTaskID(account, taskID string) (string, error) {
+// GcalToday fetches today's calendar events for the given account. If taskID
+// is non-empty it is sent as the X-Gobrrr-Task-ID header. It returns the raw
+// JSON response body as a string.
+func (c *Client) GcalToday(account, taskID string) (string, error) {
 	body := gcalAccountRequest{Account: account}
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -522,14 +504,10 @@ func (c *Client) GcalTodayWithTaskID(account, taskID string) (string, error) {
 	return string(raw), nil
 }
 
-// GcalWeek fetches this week's calendar events for the given account.
-// It returns the raw JSON response body as a string.
-func (c *Client) GcalWeek(account string) (string, error) {
-	return c.GcalWeekWithTaskID(account, "")
-}
-
-// GcalWeekWithTaskID is like GcalWeek but attaches an X-Gobrrr-Task-ID header.
-func (c *Client) GcalWeekWithTaskID(account, taskID string) (string, error) {
+// GcalWeek fetches this week's calendar events for the given account. If
+// taskID is non-empty it is sent as the X-Gobrrr-Task-ID header. It returns
+// the raw JSON response body as a string.
+func (c *Client) GcalWeek(account, taskID string) (string, error) {
 	body := gcalAccountRequest{Account: account}
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -559,13 +537,9 @@ func (c *Client) GcalWeekWithTaskID(account, taskID string) (string, error) {
 }
 
 // GcalGetEvent fetches a single calendar event by ID for the given account.
-// It returns the raw JSON response body as a string.
-func (c *Client) GcalGetEvent(eventID, account string) (string, error) {
-	return c.GcalGetEventWithTaskID(eventID, account, "")
-}
-
-// GcalGetEventWithTaskID is like GcalGetEvent but attaches an X-Gobrrr-Task-ID header.
-func (c *Client) GcalGetEventWithTaskID(eventID, account, taskID string) (string, error) {
+// If taskID is non-empty it is sent as the X-Gobrrr-Task-ID header. It returns
+// the raw JSON response body as a string.
+func (c *Client) GcalGetEvent(eventID, account, taskID string) (string, error) {
 	body := gcalGetRequest{EventID: eventID, Account: account}
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -594,13 +568,10 @@ func (c *Client) GcalGetEventWithTaskID(eventID, account, taskID string) (string
 	return string(raw), nil
 }
 
-// GcalCreateEvent creates a new calendar event via the daemon.
-func (c *Client) GcalCreateEvent(title, start, end, description, account string) error {
-	return c.GcalCreateEventWithTaskID(title, start, end, description, account, "")
-}
-
-// GcalCreateEventWithTaskID is like GcalCreateEvent but attaches an X-Gobrrr-Task-ID header.
-func (c *Client) GcalCreateEventWithTaskID(title, start, end, description, account, taskID string) error {
+// GcalCreateEvent creates a new calendar event via the daemon. If taskID is
+// non-empty it is sent as the X-Gobrrr-Task-ID header so the daemon can
+// enforce write authorization.
+func (c *Client) GcalCreateEvent(title, start, end, description, account, taskID string) error {
 	reqBody := gcalCreateRequest{Title: title, Start: start, End: end, Description: description, Account: account}
 	data, err := json.Marshal(reqBody)
 	if err != nil {
@@ -628,13 +599,10 @@ func (c *Client) GcalCreateEventWithTaskID(title, start, end, description, accou
 	return nil
 }
 
-// GcalUpdateEvent updates an existing calendar event via the daemon.
-func (c *Client) GcalUpdateEvent(eventID, title, start, end, account string) error {
-	return c.GcalUpdateEventWithTaskID(eventID, title, start, end, account, "")
-}
-
-// GcalUpdateEventWithTaskID is like GcalUpdateEvent but attaches an X-Gobrrr-Task-ID header.
-func (c *Client) GcalUpdateEventWithTaskID(eventID, title, start, end, account, taskID string) error {
+// GcalUpdateEvent updates an existing calendar event via the daemon. If taskID
+// is non-empty it is sent as the X-Gobrrr-Task-ID header so the daemon can
+// enforce write authorization.
+func (c *Client) GcalUpdateEvent(eventID, title, start, end, account, taskID string) error {
 	reqBody := gcalUpdateRequest{EventID: eventID, Title: title, Start: start, End: end, Account: account}
 	data, err := json.Marshal(reqBody)
 	if err != nil {
@@ -662,13 +630,10 @@ func (c *Client) GcalUpdateEventWithTaskID(eventID, title, start, end, account, 
 	return nil
 }
 
-// GcalDeleteEvent deletes a calendar event via the daemon.
-func (c *Client) GcalDeleteEvent(eventID, account string) error {
-	return c.GcalDeleteEventWithTaskID(eventID, account, "")
-}
-
-// GcalDeleteEventWithTaskID is like GcalDeleteEvent but attaches an X-Gobrrr-Task-ID header.
-func (c *Client) GcalDeleteEventWithTaskID(eventID, account, taskID string) error {
+// GcalDeleteEvent deletes a calendar event via the daemon. If taskID is
+// non-empty it is sent as the X-Gobrrr-Task-ID header so the daemon can
+// enforce write authorization.
+func (c *Client) GcalDeleteEvent(eventID, account, taskID string) error {
 	reqBody := gcalDeleteRequest{EventID: eventID, Account: account}
 	data, err := json.Marshal(reqBody)
 	if err != nil {
