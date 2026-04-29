@@ -155,37 +155,6 @@ The `channel/index.ts` Bun MCP process consumed all available memory (31GB) on t
 
 **Start by:** Write the package and tests first. Then migrate `daemon/queue.go` (well-tested, bounded scope) as the proof. Then sweep the rest.
 
-## Refactor #8 — Collapse `client.go` Gmail/Gcal duplicates + extract transport helpers — 2026-04-26
-
-**What:** `internal/client/client.go` is 912 lines because every Gmail/Gcal method exists as both `Foo` and `FooWithTaskID`, and only the `WithTaskID` variant is ever called (the bare `Foo` versions just call `FooWithTaskID(args, "")`). Delete the bare wrappers, rename `*WithTaskID` to the short name, pass `taskID=""` at the few call sites that don't care. Then extract `postJSON`/`getJSON`/`deleteResource` helpers — every Gmail/Gcal method follows the same marshal→NewRequest→Content-Type→optional X-Gobrrr-Task-ID→Do→status check→ReadAll→return shape (~9 copies of ~25 lines each).
-
-**Why:** Combined, these collapse client.go from 912 to ~400 lines without changing any external behavior. The 403→"write not permitted" mapping that's repeated in 4 places becomes one branch in the helper. Plus, delete dead wrappers.
-
-**Files / docs:**
-- `daemon/internal/client/client.go` — main target; contains all the duplicates and inline plumbing
-- `daemon/internal/client/skill.go`, `approvals.go` — already-split; reference for style
-- New: `daemon/internal/client/transport.go` — `postJSON`, `getJSON`, `deleteResource`
-- `daemon/cmd/gobrrr/main.go` — call sites that pass `""` for taskID; verify post-rename
-
-**Constraints:**
-- Two commits: (a) delete bare wrappers + rename `*WithTaskID` → no behavior change; (b) extract transport helpers + collapse copies → still no behavior change.
-- Maintain identical exported signatures other than the rename. The CLI is the only caller; rename is a single-pass `sed`.
-- Status-code → error mapping must remain identical (especially 403).
-
-**Acceptance criteria:**
-- [ ] `client.go` ≤ 450 lines.
-- [ ] No `*WithTaskID` methods remain (taskID is just an arg of the unified method).
-- [ ] `postJSON`, `getJSON`, `deleteResource` exist and are used by every Gmail/Gcal/memory/schedule call.
-- [ ] All client tests pass; add unit tests for the helpers if not already covered transitively.
-
-**Out of scope:**
-- Replacing `map[string]any` returns with typed structs (Refactor #12 / I12 in original review).
-- Splitting client.go further into per-domain files. After the collapse, ~400 lines is fine.
-
-**Estimated effort:** medium — ~1 hour of mechanical work + verification.
-
-**Start by:** Confirm via grep that no `Foo` (non-WithTaskID) variant has callers. Delete the wrappers as commit 1. Then extract the helpers as commit 2.
-
 ## Refactor #10 — Split `cmd/gobrrr/main.go` (1060 lines) by verb + standardize flag style — 2026-04-26
 
 **What:** `cmd/gobrrr/main.go` contains every cobra command (daemon, task, gmail, gcal, memory, session, timer, skill, setup) inline. Split into `cmd/gobrrr/{daemon,task,gmail,gcal,memory,session,timer,skill,setup}.go`, each owning a `func register<Verb>(root *cobra.Command)`. `main.go` shrinks to ~50 lines (entrypoint, root cmd, init calling registers). Also: standardize on `cmd.Flags().GetString("name")` (already used by `timer`) — drop the 30+ package-global flag vars (`gmailListUnread`, etc.) used elsewhere.
