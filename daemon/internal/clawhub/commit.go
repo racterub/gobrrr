@@ -13,6 +13,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/racterub/gobrrr/internal/atomicfs"
 	"github.com/racterub/gobrrr/internal/skills"
 )
 
@@ -115,11 +116,7 @@ func (c *Committer) Commit(req InstallRequest, decision Decision) error {
 		ApprovedBinaries:         approvedBins,
 		BinaryInstallCommands:    records,
 	}
-	metaBytes, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := writeAtomic(filepath.Join(dst, "_meta.json"), metaBytes, 0600); err != nil {
+	if err := atomicfs.WriteJSON(filepath.Join(dst, "_meta.json"), meta, 0600); err != nil {
 		return err
 	}
 
@@ -204,9 +201,5 @@ func updateLock(skillsRoot, slug, version, sha string) error {
 		lf.Skills = map[string]lockEntry{}
 	}
 	lf.Skills[slug] = lockEntry{Version: version, SHA256: sha, Updated: time.Now().UTC().Format(time.RFC3339)}
-	out, err := json.MarshalIndent(lf, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writeAtomic(path, out, 0600)
+	return atomicfs.WriteJSON(path, lf, 0600)
 }
