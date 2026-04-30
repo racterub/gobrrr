@@ -10,6 +10,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/racterub/gobrrr/internal/atomicfs"
 )
 
 // Task represents a unit of work dispatched to a Claude worker.
@@ -392,25 +394,14 @@ func (q *Queue) flush() error {
 		envelope.Tasks = []*Task{}
 	}
 
-	data, err := json.MarshalIndent(envelope, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshalling queue: %w", err)
-	}
-
 	dir := filepath.Dir(q.path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating queue dir: %w", err)
 	}
 
-	tmp := q.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return fmt.Errorf("writing tmp queue: %w", err)
+	if err := atomicfs.WriteJSON(q.path, envelope, 0600); err != nil {
+		return fmt.Errorf("writing queue: %w", err)
 	}
-
-	if err := os.Rename(tmp, q.path); err != nil {
-		return fmt.Errorf("renaming tmp queue: %w", err)
-	}
-
 	return nil
 }
 
