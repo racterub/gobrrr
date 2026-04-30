@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/racterub/gobrrr/internal/atomicfs"
 )
 
 // ApprovalRequest is the persistent record of a pending user approval.
@@ -43,15 +45,7 @@ func (s *ApprovalStore) Save(req *ApprovalRequest) error {
 	if err := os.MkdirAll(s.dir(), 0700); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(req, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := s.path(req.ID) + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path(req.ID))
+	return atomicfs.WriteJSON(s.path(req.ID), req, 0600)
 }
 
 func (s *ApprovalStore) Load(id string) (*ApprovalRequest, error) {
