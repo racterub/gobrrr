@@ -2,7 +2,6 @@ package skills
 
 import (
 	"embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/racterub/gobrrr/internal/atomicfs"
 )
 
 //go:embed system/*/*
@@ -94,17 +95,5 @@ func installOneSystemSkill(root, slug string) error {
 		ApprovedReadPermissions:  fm.Metadata.OpenClaw.Requires.ToolPermissions.Read,
 		ApprovedWritePermissions: fm.Metadata.OpenClaw.Requires.ToolPermissions.Write,
 	}
-	data, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writeAtomic(filepath.Join(dst, "_meta.json"), data, 0600)
-}
-
-func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, mode); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfs.WriteJSON(filepath.Join(dst, "_meta.json"), meta, 0600)
 }
