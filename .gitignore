@@ -6,3 +6,4 @@ plugins/gobrrr-telegram/gobrrr-telegram
 .gobrrr/
 vendor/
 .worktrees/
+.go-version
