@@ -155,37 +155,6 @@ The `channel/index.ts` Bun MCP process consumed all available memory (31GB) on t
 
 **Start by:** Write the package and tests first. Then migrate `daemon/queue.go` (well-tested, bounded scope) as the proof. Then sweep the rest.
 
-## Refactor #10 — Split `cmd/gobrrr/main.go` (1060 lines) by verb + standardize flag style — 2026-04-26
-
-**What:** `cmd/gobrrr/main.go` contains every cobra command (daemon, task, gmail, gcal, memory, session, timer, skill, setup) inline. Split into `cmd/gobrrr/{daemon,task,gmail,gcal,memory,session,timer,skill,setup}.go`, each owning a `func register<Verb>(root *cobra.Command)`. `main.go` shrinks to ~50 lines (entrypoint, root cmd, init calling registers). Also: standardize on `cmd.Flags().GetString("name")` (already used by `timer`) — drop the 30+ package-global flag vars (`gmailListUnread`, etc.) used elsewhere.
-
-**Why:** 1060 lines is unreadable; the global flag vars are an anti-pattern that puts command-local state at module scope. Two-style flag wiring (closures vs globals) is jarring.
-
-**Files / docs:**
-- `daemon/cmd/gobrrr/main.go` — split source
-- New: `daemon/cmd/gobrrr/{daemon,task,gmail,gcal,memory,session,timer,skill,setup}.go`
-- Reference: existing `timer` command's flag style for the target pattern
-- Concrete global-var sites to migrate: `main.go:110-117, 264-269, 292, 310-315, 334-336, 362, 379, 396, 414-419, 439-443, 461, 484-488, 516-518, 548, 719`
-
-**Constraints:**
-- Two commits: (a) per-verb split (pure structural, no behavior change); (b) flag-style standardization (also no behavior change but touches all commands). Keep them separate so reverts are easy.
-- All commands must keep identical CLI surface (subcommand names, flag names, exit codes).
-- Inconsistent exit-code policy is its own item (M5 in original review) — punt for now.
-
-**Acceptance criteria:**
-- [ ] `main.go` ≤ 100 lines.
-- [ ] Each verb has its own file with a `register<Verb>(root)` function.
-- [ ] Zero package-level flag-value vars remain (verified by `go vet -shadow` or grep).
-- [ ] CLI smoke tests still pass; all `--help` output is unchanged.
-
-**Out of scope:**
-- Typed response structs replacing `map[string]any` (Refactor #12-derivative; tracked elsewhere).
-- Exit-code policy reconciliation.
-
-**Estimated effort:** medium — split is fast; flag standardization touches every command. ~1-2 hours.
-
-**Start by:** Do the split first as commit 1. Run `gobrrr --help` and every subcommand `--help` to compare output before/after. Then standardize flags as commit 2.
-
 ## Refactor #11 — Generic UNTRUSTED wrapper applied to every external field — 2026-04-26
 
 **What:** `WrapEmail` only wraps the email **body**. Subject, From, Snippet, Date, and Attachments names are exposed unwrapped through `MessageDetail`. `WrapCalendarEvent` only wraps Description — not Title, Location, or Attendees. Subjects, titles, and location strings are textbook prompt-injection vectors. Replace per-type wrappers with a generic `boundary.Wrap(kind string, fields map[string]string)` builder; have callers wrap every untrusted field.
