@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/racterub/gobrrr/internal/atomicfs"
 	"github.com/robfig/cron/v3"
 )
 
@@ -78,18 +79,10 @@ func (s *Scheduler) Save() error {
 }
 
 func (s *Scheduler) flush() error {
-	data, err := json.MarshalIndent(s.schedules, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := s.filePath + ".tmp"
 	if err := os.MkdirAll(filepath.Dir(s.filePath), 0700); err != nil {
 		return err
 	}
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.filePath)
+	return atomicfs.WriteJSON(s.filePath, s.schedules, 0600)
 }
 
 // Create adds a new schedule. Returns error if name already exists or cron is invalid.
