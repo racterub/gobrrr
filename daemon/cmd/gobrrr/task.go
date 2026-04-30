@@ -10,37 +10,31 @@ import (
 	"github.com/racterub/gobrrr/internal/daemon"
 )
 
-// Submit flag-value vars (Phase 2 will eliminate these in favor of cmd.Flags().Get*).
-var (
-	submitPrompt      string
-	submitReplyTo     string
-	submitPriority    int
-	submitAllowWrites bool
-	submitTimeout     int
-	submitWarm        bool
-)
-
-// List flag-value var (Phase 2 will eliminate this).
-var listAll bool
-
 // registerTask wires the root-level task verbs (submit/list/status/cancel/logs/approve/deny) onto root.
 func registerTask(root *cobra.Command) {
 	submitCmd := &cobra.Command{
 		Use:   "submit",
 		Short: "Submit a new task",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if submitPrompt == "" {
+			prompt, _ := cmd.Flags().GetString("prompt")
+			replyTo, _ := cmd.Flags().GetString("reply-to")
+			priority, _ := cmd.Flags().GetInt("priority")
+			allowWrites, _ := cmd.Flags().GetBool("allow-writes")
+			timeout, _ := cmd.Flags().GetInt("timeout")
+			warm, _ := cmd.Flags().GetBool("warm")
+
+			if prompt == "" {
 				return fmt.Errorf("--prompt is required")
 			}
 			c := newClient()
-			task, err := c.SubmitTask(submitPrompt, submitReplyTo, submitPriority, submitAllowWrites, submitTimeout, submitWarm)
+			task, err := c.SubmitTask(prompt, replyTo, priority, allowWrites, timeout, warm)
 			if err != nil {
 				return err
 			}
 
 			// When reply-to is stdout, block until the task completes and print
 			// the result to stdout (or error to stderr with non-zero exit).
-			if submitReplyTo == "stdout" {
+			if replyTo == "stdout" {
 				result, waitErr := c.WaitForTask(task.ID)
 				if waitErr != nil {
 					// Connection loss: exit 2; task failure: exit 1.
@@ -64,8 +58,9 @@ func registerTask(root *cobra.Command) {
 		Use:   "list",
 		Short: "List tasks",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			all, _ := cmd.Flags().GetBool("all")
 			c := newClient()
-			tasks, err := c.ListTasks(listAll)
+			tasks, err := c.ListTasks(all)
 			if err != nil {
 				return err
 			}
@@ -153,14 +148,14 @@ func registerTask(root *cobra.Command) {
 		},
 	}
 
-	submitCmd.Flags().StringVar(&submitPrompt, "prompt", "", "Task prompt (required)")
-	submitCmd.Flags().StringVar(&submitReplyTo, "reply-to", "channel", "Reply destination (e.g. channel, telegram, stdout)")
-	submitCmd.Flags().IntVar(&submitPriority, "priority", 5, "Task priority (lower = higher priority)")
-	submitCmd.Flags().BoolVar(&submitAllowWrites, "allow-writes", false, "Allow file writes")
-	submitCmd.Flags().IntVar(&submitTimeout, "timeout", 300, "Timeout in seconds")
-	submitCmd.Flags().BoolVar(&submitWarm, "warm", false, "Route to warm worker for fast dispatch")
+	submitCmd.Flags().String("prompt", "", "Task prompt (required)")
+	submitCmd.Flags().String("reply-to", "channel", "Reply destination (e.g. channel, telegram, stdout)")
+	submitCmd.Flags().Int("priority", 5, "Task priority (lower = higher priority)")
+	submitCmd.Flags().Bool("allow-writes", false, "Allow file writes")
+	submitCmd.Flags().Int("timeout", 300, "Timeout in seconds")
+	submitCmd.Flags().Bool("warm", false, "Route to warm worker for fast dispatch")
 
-	listCmd.Flags().BoolVar(&listAll, "all", false, "Include completed/failed tasks")
+	listCmd.Flags().Bool("all", false, "Include completed/failed tasks")
 
 	root.AddCommand(submitCmd, listCmd, statusCmd, cancelCmd, logsCmd, approveCmd, denyCmd)
 }

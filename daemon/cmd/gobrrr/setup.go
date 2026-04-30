@@ -16,17 +16,16 @@ func registerSetup(root *cobra.Command) {
 		},
 	}
 
-	var setupGoogleAccountName string
-
 	setupGoogleAccountCmd := &cobra.Command{
 		Use:   "google-account",
 		Short: "Add a Google account",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return setup.RunGoogleAccountSetup(setupGoogleAccountName)
+			name, _ := cmd.Flags().GetString("name")
+			return setup.RunGoogleAccountSetup(name)
 		},
 	}
 
-	setupGoogleAccountCmd.Flags().StringVar(&setupGoogleAccountName, "name", "", "Account label (e.g. personal, work)")
+	setupGoogleAccountCmd.Flags().String("name", "", "Account label (e.g. personal, work)")
 	setupCmd.AddCommand(setupGoogleAccountCmd)
 	root.AddCommand(setupCmd)
 }

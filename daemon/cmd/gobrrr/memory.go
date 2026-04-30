@@ -9,15 +9,6 @@ import (
 	"github.com/racterub/gobrrr/internal/memory"
 )
 
-// Memory flag-value vars (Phase 2 will eliminate these).
-var (
-	memorySaveContent string
-	memorySaveTags    string
-	memorySaveSource  string
-	memorySearchTags  string
-	memoryListLimit   int
-)
-
 // registerMemory wires the `memory` verb (save/search/list/get/delete) onto root.
 func registerMemory(root *cobra.Command) {
 	memoryCmd := &cobra.Command{
@@ -29,12 +20,15 @@ func registerMemory(root *cobra.Command) {
 		Use:   "save",
 		Short: "Save a memory entry",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if memorySaveContent == "" {
+			content, _ := cmd.Flags().GetString("content")
+			tagsStr, _ := cmd.Flags().GetString("tags")
+			source, _ := cmd.Flags().GetString("source")
+			if content == "" {
 				return fmt.Errorf("--content is required")
 			}
 			var tags []string
-			if memorySaveTags != "" {
-				for _, t := range strings.Split(memorySaveTags, ",") {
+			if tagsStr != "" {
+				for _, t := range strings.Split(tagsStr, ",") {
 					t = strings.TrimSpace(t)
 					if t != "" {
 						tags = append(tags, t)
@@ -42,7 +36,7 @@ func registerMemory(root *cobra.Command) {
 				}
 			}
 			c := newClient()
-			entry, err := c.SaveMemory(memorySaveContent, tags, memorySaveSource)
+			entry, err := c.SaveMemory(content, tags, source)
 			if err != nil {
 				return err
 			}
@@ -60,9 +54,10 @@ func registerMemory(root *cobra.Command) {
 			if len(args) > 0 {
 				query = args[0]
 			}
+			tagsStr, _ := cmd.Flags().GetString("tags")
 			var tags []string
-			if memorySearchTags != "" {
-				for _, t := range strings.Split(memorySearchTags, ",") {
+			if tagsStr != "" {
+				for _, t := range strings.Split(tagsStr, ",") {
 					t = strings.TrimSpace(t)
 					if t != "" {
 						tags = append(tags, t)
@@ -83,8 +78,9 @@ func registerMemory(root *cobra.Command) {
 		Use:   "list",
 		Short: "List memory entries",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			limit, _ := cmd.Flags().GetInt("limit")
 			c := newClient()
-			entries, err := c.SearchMemory("", nil, memoryListLimit)
+			entries, err := c.SearchMemory("", nil, limit)
 			if err != nil {
 				return err
 			}
@@ -122,13 +118,13 @@ func registerMemory(root *cobra.Command) {
 		},
 	}
 
-	memorySaveCmd.Flags().StringVar(&memorySaveContent, "content", "", "Memory content (required)")
-	memorySaveCmd.Flags().StringVar(&memorySaveTags, "tags", "", "Comma-separated tags")
-	memorySaveCmd.Flags().StringVar(&memorySaveSource, "source", "", "Source of the memory")
+	memorySaveCmd.Flags().String("content", "", "Memory content (required)")
+	memorySaveCmd.Flags().String("tags", "", "Comma-separated tags")
+	memorySaveCmd.Flags().String("source", "", "Source of the memory")
 
-	memorySearchCmd.Flags().StringVar(&memorySearchTags, "tags", "", "Comma-separated tags to filter by")
+	memorySearchCmd.Flags().String("tags", "", "Comma-separated tags to filter by")
 
-	memoryListCmd.Flags().IntVar(&memoryListLimit, "limit", 20, "Maximum number of entries to return")
+	memoryListCmd.Flags().Int("limit", 20, "Maximum number of entries to return")
 
 	memoryCmd.AddCommand(memorySaveCmd, memorySearchCmd, memoryListCmd, memoryGetCmd, memoryDeleteCmd)
 	root.AddCommand(memoryCmd)
