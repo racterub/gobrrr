@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/racterub/gobrrr/internal/atomicfs"
 )
 
 // Entry represents a single memory record.
@@ -208,7 +210,7 @@ func (s *Store) writeEntry(e *Entry) error {
 	if err != nil {
 		return err
 	}
-	return atomicWrite(s.entryPath(e.ID), data)
+	return atomicfs.WriteFile(s.entryPath(e.ID), data, 0600)
 }
 
 func (s *Store) readEntry(id string) (*Entry, error) {
@@ -244,16 +246,7 @@ func (s *Store) persistIndex() error {
 	if err != nil {
 		return err
 	}
-	return atomicWrite(s.indexPath(), data)
-}
-
-// atomicWrite writes data to path via a temp file + rename.
-func atomicWrite(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfs.WriteFile(s.indexPath(), data, 0600)
 }
 
 // matchTags returns true if all required tags appear in entryTags.
