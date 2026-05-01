@@ -2,6 +2,7 @@ package atomicfs_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -81,4 +82,39 @@ func TestWriteJSONShape(t *testing.T) {
 
 	// Two-space indent contract.
 	assert.Contains(t, string(got), "\n  \"a\":")
+}
+
+func TestWriteFileFsyncsParentDir(t *testing.T) {
+	var (
+		calls  int
+		gotDir string
+	)
+	restore := atomicfs.SetFsyncDirForTest(func(dir string) error {
+		calls++
+		gotDir = dir
+		return nil
+	})
+	defer restore()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.json")
+
+	require.NoError(t, atomicfs.WriteFile(path, []byte("x"), 0600))
+
+	assert.Equal(t, 1, calls, "fsync must be called exactly once per WriteFile")
+	assert.Equal(t, dir, gotDir, "fsync target must be the parent directory of the written file")
+}
+
+func TestWriteFileFsyncErrorPropagates(t *testing.T) {
+	sentinel := errors.New("simulated fsync failure")
+	restore := atomicfs.SetFsyncDirForTest(func(string) error {
+		return sentinel
+	})
+	defer restore()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.json")
+
+	err := atomicfs.WriteFile(path, []byte("x"), 0600)
+	assert.ErrorIs(t, err, sentinel, "WriteFile must surface fsync errors to the caller")
 }
