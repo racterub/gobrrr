@@ -118,3 +118,13 @@ func TestWriteFileFsyncErrorPropagates(t *testing.T) {
 	err := atomicfs.WriteFile(path, []byte("x"), 0600)
 	assert.ErrorIs(t, err, sentinel, "WriteFile must surface fsync errors to the caller")
 }
+
+// Smoke test of the real fsyncDir (not the test hook). Tripwire for
+// regressions in the production open/sync/close path; the hook-swapping
+// tests above can't catch those because they bypass the real impl.
+func TestRealFsyncDirSucceedsOnHealthyTempDir(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.json")
+
+	require.NoError(t, atomicfs.WriteFile(path, []byte("x"), 0600))
+}
