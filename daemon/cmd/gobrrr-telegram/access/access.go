@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/racterub/gobrrr/internal/atomicfs"
 )
 
 type DMPolicy string
@@ -128,9 +130,5 @@ func (s *Store) Save(a Access) error {
 		return err
 	}
 	buf = append(buf, '\n')
-	tmp := s.path() + ".tmp"
-	if err := os.WriteFile(tmp, buf, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path())
+	return atomicfs.WriteFile(s.path(), buf, 0600)
 }
