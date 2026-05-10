@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/racterub/gobrrr/internal/clawhub"
 )
@@ -52,5 +53,13 @@ func (h *skillInstallHandler) Handle(req *ApprovalRequest, decision string) erro
 	default:
 		return fmt.Errorf("skill_install: unknown decision %q", decision)
 	}
-	return h.committer.Commit(installReq, d)
+	if err := h.committer.Commit(installReq, d); err != nil {
+		return err
+	}
+	if d.Approve && h.refresher != nil {
+		if err := h.refresher.Refresh(); err != nil {
+			log.Printf("skill_install: registry refresh failed after commit: %v", err)
+		}
+	}
+	return nil
 }
