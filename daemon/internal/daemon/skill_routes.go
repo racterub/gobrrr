@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -93,8 +94,7 @@ func (d *Daemon) handleSkillsUninstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.skillReg.Refresh(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		log.Printf("skill_uninstall: registry refresh failed after remove: %v", err)
 	}
 	fmt.Fprintf(w, "uninstalled %s\n", slug)
 }
