@@ -308,6 +308,50 @@ func TestGetReturnsErrorForUnknownID(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestGetReturnsSnapshotNotAlias verifies that Get returns a copy of the
+// task. Without this, callers reading fields on the returned *Task race with
+// concurrent Queue.Next/Complete mutations under the queue mutex (this is
+// what tripped the -race detector in the WorkerPool tests).
+func TestGetReturnsSnapshotNotAlias(t *testing.T) {
+	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
+
+	submitted, err := q.Submit("p", "", 0, false, 5, false)
+	require.NoError(t, err)
+
+	snapshot, err := q.Get(submitted.ID)
+	require.NoError(t, err)
+	require.Equal(t, "queued", snapshot.Status)
+
+	_, err = q.Next()
+	require.NoError(t, err)
+	require.NoError(t, q.Complete(submitted.ID, "done"))
+
+	assert.Equal(t, "queued", snapshot.Status, "Get must return a snapshot, not an alias to internal state")
+	assert.Nil(t, snapshot.StartedAt, "snapshot.StartedAt must not observe queue mutations after Get")
+	assert.Nil(t, snapshot.CompletedAt, "snapshot.CompletedAt must not observe queue mutations after Get")
+	assert.Nil(t, snapshot.Result, "snapshot.Result must not observe queue mutations after Get")
+}
+
+// TestSubmitReturnsSnapshotNotAlias verifies that Submit returns a copy of
+// the task. Without this, the HTTP submit handler races with the worker pool
+// when JSON-encoding the response after the lock is released.
+func TestSubmitReturnsSnapshotNotAlias(t *testing.T) {
+	q := daemon.NewQueue(filepath.Join(t.TempDir(), "queue.json"))
+
+	submitted, err := q.Submit("p", "", 0, false, 5, false)
+	require.NoError(t, err)
+	require.Equal(t, "queued", submitted.Status)
+
+	_, err = q.Next()
+	require.NoError(t, err)
+	require.NoError(t, q.Complete(submitted.ID, "done"))
+
+	assert.Equal(t, "queued", submitted.Status, "Submit must return a snapshot, not an alias to internal state")
+	assert.Nil(t, submitted.StartedAt, "snapshot.StartedAt must not observe queue mutations after Submit")
+	assert.Nil(t, submitted.CompletedAt, "snapshot.CompletedAt must not observe queue mutations after Submit")
+	assert.Nil(t, submitted.Result, "snapshot.Result must not observe queue mutations after Submit")
+}
+
 // TestTaskDeliveredFieldPersistence verifies that MarkDelivered sets the
 // Delivered field and that it survives a reload from disk.
 func TestTaskDeliveredFieldPersistence(t *testing.T) {

@@ -117,7 +117,10 @@ func (q *Queue) Submit(prompt, replyTo string, priority int, allowWrites bool, t
 		return nil, fmt.Errorf("persisting queue: %w", err)
 	}
 
-	return task, nil
+	// Return a snapshot, not the aliased pointer — once the lock is released
+	// the worker pool may mutate this Task's fields concurrently.
+	snapshot := *task
+	return &snapshot, nil
 }
 
 // Next returns the next task to run (highest priority → lowest number, then
@@ -287,7 +290,15 @@ func (q *Queue) MarkDelivered(id string) error {
 func (q *Queue) Get(id string) (*Task, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.findLocked(id)
+	t, err := q.findLocked(id)
+	if err != nil {
+		return nil, err
+	}
+	// Return a snapshot, not the aliased pointer — see List for the same
+	// pattern. Without this, callers reading fields after the lock is
+	// released race with concurrent Next/Complete/Fail mutations.
+	snapshot := *t
+	return &snapshot, nil
 }
 
 // List returns all tasks. When all is false, only active tasks (queued,
