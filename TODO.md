@@ -277,32 +277,3 @@ The `channel/index.ts` Bun MCP process consumed all available memory (31GB) on t
 
 **Start by:** Confirm with user which direction. Default recommendation: delete. The launcher path is what production uses; the in-daemon mode adds risk for no current benefit.
 
-## Refactor #19 — Fix data races in worker-pool tests flagged by `-race` — 2026-05-10
-
-**What:** `cd daemon && go test -race ./...` flags concurrent map/slice access in `TestWorkerPoolTaskResultStored`, `TestWorkerPoolRoutesWarmTask`, and `TestWorkerPoolWarmFallbackToCold`. The races reproduce on master — they predate the skill-registry-refresh branch — but the race detector is currently dirty so future refactors can't trust it as a regression gate.
-
-**Why:** Either the worker pool has a real concurrency bug that's masked because the production code path serializes through a single goroutine, or the tests reach into shared state without going through the same synchronization the production code uses. Either way the race detector should be clean before any future worker-pool refactor; otherwise we can't tell whether a new change introduced a problem.
-
-**Files / docs:**
-- `daemon/internal/daemon/worker.go` — production worker pool implementation
-- `daemon/internal/daemon/worker_test.go` (or whichever test file owns the three tests above) — the racy assertions
-- Run `cd daemon && go test -race ./internal/daemon/ -run TestWorkerPool -v` to see the exact stack traces
-
-**Constraints:**
-- Don't fix the race by adding a `time.Sleep` — find the actual missing synchronization point.
-- If the race is in tests only (e.g. asserting on a result map without locking), fix the test. If it's in production code, fix the production code with a proper mutex or channel.
-- Pre-existing race detector failures must NOT be silenced with `-race=off`.
-
-**Acceptance criteria:**
-- [ ] `cd daemon && go test -race ./...` exits 0.
-- [ ] If production code changed, no behavioral regression on the existing happy-path tests.
-- [ ] CI (or local quality gate) gains a `-race` step so the next regression is caught immediately.
-
-**Out of scope:**
-- Rewriting the worker pool architecture (Refactor #1 territory if it ever lands).
-- Adding new tests for warm-pool features.
-
-**Estimated effort:** medium — diagnosis is the bulk; fix likely small. May be 1 site, may be 3.
-
-**Start by:** Run with `-race` and read the stack traces. Identify whether the race is `worker.go` accessing shared state from a goroutine or test code asserting on production state without locking. Fix the smallest reproduction first.
-
