@@ -41,7 +41,7 @@ cd daemon && CGO_ENABLED=0 go build -o gobrrr ./cmd/gobrrr/
 ## Test
 
 ```bash
-cd daemon && go test ./...
+cd daemon && make test   # runs go test -race ./...
 ```
 
 ## Project Structure
