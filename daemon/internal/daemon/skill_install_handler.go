@@ -13,18 +13,27 @@ type committerLike interface {
 	Commit(req clawhub.InstallRequest, decision clawhub.Decision) error
 }
 
+// refresherLike is the minimal contract for reloading the skill registry after
+// a successful install. *skills.Registry satisfies this directly.
+type refresherLike interface {
+	Refresh() error
+}
+
 // skillInstallHandler implements ApprovalHandler for kind="skill_install".
 // It unmarshals the payload (a clawhub.InstallRequest) and delegates to the
-// committer with a decision mapped from the generic string.
+// committer with a decision mapped from the generic string. After a successful
+// approve commit, it triggers a registry refresh so newly-installed skills are
+// visible to subsequent worker spawns without a daemon restart.
 type skillInstallHandler struct {
 	committer committerLike
+	refresher refresherLike
 }
 
 // NewSkillInstallHandlerForTesting exposes the internal handler to other
 // packages' tests. Production code registers via the dispatcher wiring in
 // daemon.New.
-func NewSkillInstallHandlerForTesting(c committerLike) ApprovalHandler {
-	return &skillInstallHandler{committer: c}
+func NewSkillInstallHandlerForTesting(c committerLike, r refresherLike) ApprovalHandler {
+	return &skillInstallHandler{committer: c, refresher: r}
 }
 
 func (h *skillInstallHandler) Handle(req *ApprovalRequest, decision string) error {
