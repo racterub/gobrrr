@@ -124,37 +124,6 @@ The `channel/index.ts` Bun MCP process consumed all available memory (31GB) on t
 
 **Start by:** Pick blocking vs fail-fast for the worker contract. Then wire the handler with one concrete write tool (e.g. `gmail send`) end-to-end as the proof, then sweep the rest.
 
-## Refactor #6 — Centralize atomic file IO into `internal/atomicfs` — 2026-04-26
-
-**What:** Five+ packages reimplement `tmp + WriteFile + Rename`: `memory/store.go:251`, `daemon/queue.go:407`, `daemon/approvals_store.go:50-54` (inline), `clawhub/installer.go:360`, `clawhub/commit.go` (uses installer's), `skills/bundled.go:104`, `scheduler/scheduler.go:80-93`. Two packages skip atomicity entirely (`crypto/vault.go`, `google/auth.go` — see Refactor #4). None of them fsync the parent directory, so on power loss the rename can be lost. Extract `internal/atomicfs.WriteFile(path, data, perm)` and `WriteJSON(path, v, perm)` and migrate everyone.
-
-**Why:** The "atomic JSON file persistence" rule in CLAUDE.md is a stated design pillar. Right now it's enforced inconsistently — perms differ (`0600` vs default), some sites tolerate the temp file leaking on rename failure, none fsync the parent. One audit point for these properties is worth the small refactor.
-
-**Files / docs:**
-- New: `daemon/internal/atomicfs/write.go` — `WriteFile`, `WriteJSON`, both with parent-dir fsync
-- Migration sites: `memory/store.go`, `daemon/queue.go`, `daemon/approvals_store.go`, `clawhub/installer.go`, `clawhub/commit.go`, `skills/bundled.go`, `scheduler/scheduler.go`, `google/auth.go` (for Refactor #4)
-- New tests: `atomicfs/write_test.go` (basic round-trip, perm enforcement, rename-fail cleanup, parent fsync — though parent fsync is hard to assert without mocking)
-
-**Constraints:**
-- Pure structural change. No behavior change visible to callers (other than the parent-dir fsync, which only matters on power loss).
-- Default perm should be `0600` (matches the project's secrets-by-default stance).
-- Cannot import any other internal package — `atomicfs` should be a leaf.
-
-**Acceptance criteria:**
-- [ ] `internal/atomicfs` package exists with `WriteFile` and `WriteJSON`.
-- [ ] Every listed migration site uses the new helper.
-- [ ] All inline `os.WriteFile(...".tmp"...)` patterns are gone (grep verifies).
-- [ ] All existing tests still pass; add `atomicfs/write_test.go`.
-- [ ] Each migration is a separate commit (one per package) so reverts are surgical.
-
-**Out of scope:**
-- Cross-file atomicity (multi-file transactions).
-- Replacing the on-disk JSON persistence with sqlite/bolt.
-
-**Estimated effort:** medium — package + ~7 migration commits + tests. Each migration is small; total 1-2 hours of focused work.
-
-**Start by:** Write the package and tests first. Then migrate `daemon/queue.go` (well-tested, bounded scope) as the proof. Then sweep the rest.
-
 ## Refactor #11 — Generic UNTRUSTED wrapper applied to every external field — 2026-04-26
 
 **What:** `WrapEmail` only wraps the email **body**. Subject, From, Snippet, Date, and Attachments names are exposed unwrapped through `MessageDetail`. `WrapCalendarEvent` only wraps Description — not Title, Location, or Attendees. Subjects, titles, and location strings are textbook prompt-injection vectors. Replace per-type wrappers with a generic `boundary.Wrap(kind string, fields map[string]string)` builder; have callers wrap every untrusted field.
@@ -308,32 +277,63 @@ The `channel/index.ts` Bun MCP process consumed all available memory (31GB) on t
 
 **Start by:** Confirm with user which direction. Default recommendation: delete. The launcher path is what production uses; the in-daemon mode adds risk for no current benefit.
 
-## Refactor #17 — Refresh skill registry after install commit — 2026-04-26
+## Refactor #18 — Align uninstall `Refresh()` error handling with install (best-effort) — 2026-05-10
 
-**What:** `skill_routes.go:93` calls `skillReg.Refresh()` after an uninstall, but nothing refreshes after install completes. If `worker.go` calls `skillReg.List()` at task-spawn time (need to verify), workers won't see a newly-installed skill until the daemon restarts.
+**What:** `daemon/internal/daemon/skill_routes.go:95-98` returns HTTP 500 when `skillReg.Refresh()` fails after a successful uninstall. Refactor #17 established the opposite policy for the install path (`skill_install_handler.go:59-63`): log and swallow the refresh error because the on-disk state already changed and the next daemon start will re-load. Apply the same policy to uninstall so the two paths are symmetric.
 
-**Why:** This may be a real bug. The first thing to do is confirm whether `skillReg` is read at spawn or only at startup. If at spawn → bug. If at startup → currently expected, but inconsistent with the uninstall path.
+**Why:** Today, after `os.RemoveAll(<slug>)` succeeds and `Refresh()` happens to fail (e.g. a transient stat error on another skill dir), the HTTP response says the uninstall failed even though the skill is in fact gone. That's the same misleading-failure UX the spec for #17 explicitly rejected for install. The asymmetry is also confusing for anyone reading both code paths to understand the policy. Surfaced by the final reviewer of `fix/internal/skill-registry-refresh-after-install` as a non-blocking follow-up.
 
 **Files / docs:**
-- `daemon/internal/daemon/skill_routes.go:93` — refresh-after-uninstall site (reference)
-- `daemon/internal/daemon/skill_install_handler.go:30-46` — install handler; this is where the refresh should be added
-- `daemon/internal/daemon/worker.go:174-224` — `defaultBuildCommand`; check whether `wp.skillReg.List()` is called per-task or cached
-- `daemon/internal/skills/registry.go` — refresh semantics
+- `daemon/internal/daemon/skill_routes.go:95-98` — current `if err := h.skillReg.Refresh(); err != nil { http.Error(...) }`
+- Reference: `daemon/internal/daemon/skill_install_handler.go:56-64` — the policy implementation to mirror
+- `docs/superpowers/specs/2026-05-10-skill-registry-refresh-design.md` — section "Refresh failure handling: best-effort" — the rationale (same applies to uninstall)
+- Optional: a small test in `skill_routes_test.go` (or wherever the uninstall handler is exercised) asserting that a refresh error doesn't surface as 500.
 
 **Constraints:**
-- Read-then-decide. Don't add the refresh blindly — first verify the worker code path.
-- If it's a bug: write a test that submits a task immediately after install and asserts the new skill is in the worker prompt.
+- The on-disk removal must still succeed before the swallow logic runs — if `os.RemoveAll` itself fails, return 500 as today.
+- Match the log format used in install: `log.Printf("skill_uninstall: registry refresh failed after remove: %v", err)`.
+- Don't break the existing happy-path response (HTTP 200, JSON body unchanged).
 
 **Acceptance criteria:**
-- [ ] Verified whether worker reads registry per-task or per-process.
-- [ ] If per-task: refresh is added to install handler; integration test added.
-- [ ] If per-process: documented as expected (with a note in the install handler explaining why no refresh is needed).
+- [ ] `handleSkillsUninstall` logs and swallows `Refresh()` errors instead of returning 500.
+- [ ] If `os.RemoveAll` itself fails, the handler still returns 500.
+- [ ] Optional test confirms the new behavior (mirror the install handler's `RefreshErrorIsSwallowed` test if a Refresher seam is added to the route).
+- [ ] No other behavior change.
 
 **Out of scope:**
-- Hot-reload of in-flight workers (they should keep their snapshot; only new tasks get the fresh registry).
-- Refactor #6 / #7.
+- Changing the uninstall response shape.
+- Adding a Refresher interface to the skill_routes layer (the install handler has one because it's an approval handler with an existing fake-friendly seam; routes do not).
 
-**Estimated effort:** small — investigation is the bulk; the fix (if needed) is one line.
+**Estimated effort:** small — one log line + condition flip + maybe one test.
 
-**Start by:** `grep -n 'skillReg\.\(List\|Get\|Permissions\)' daemon/internal/daemon/worker.go` to find where the registry is consulted. Then trace whether that's per-task or cached.
+**Start by:** Edit `skill_routes.go` to log+swallow. Run `cd daemon && go test ./...` to confirm nothing else relied on the 500.
+
+## Refactor #19 — Fix data races in worker-pool tests flagged by `-race` — 2026-05-10
+
+**What:** `cd daemon && go test -race ./...` flags concurrent map/slice access in `TestWorkerPoolTaskResultStored`, `TestWorkerPoolRoutesWarmTask`, and `TestWorkerPoolWarmFallbackToCold`. The races reproduce on master — they predate the skill-registry-refresh branch — but the race detector is currently dirty so future refactors can't trust it as a regression gate.
+
+**Why:** Either the worker pool has a real concurrency bug that's masked because the production code path serializes through a single goroutine, or the tests reach into shared state without going through the same synchronization the production code uses. Either way the race detector should be clean before any future worker-pool refactor; otherwise we can't tell whether a new change introduced a problem.
+
+**Files / docs:**
+- `daemon/internal/daemon/worker.go` — production worker pool implementation
+- `daemon/internal/daemon/worker_test.go` (or whichever test file owns the three tests above) — the racy assertions
+- Run `cd daemon && go test -race ./internal/daemon/ -run TestWorkerPool -v` to see the exact stack traces
+
+**Constraints:**
+- Don't fix the race by adding a `time.Sleep` — find the actual missing synchronization point.
+- If the race is in tests only (e.g. asserting on a result map without locking), fix the test. If it's in production code, fix the production code with a proper mutex or channel.
+- Pre-existing race detector failures must NOT be silenced with `-race=off`.
+
+**Acceptance criteria:**
+- [ ] `cd daemon && go test -race ./...` exits 0.
+- [ ] If production code changed, no behavioral regression on the existing happy-path tests.
+- [ ] CI (or local quality gate) gains a `-race` step so the next regression is caught immediately.
+
+**Out of scope:**
+- Rewriting the worker pool architecture (Refactor #1 territory if it ever lands).
+- Adding new tests for warm-pool features.
+
+**Estimated effort:** medium — diagnosis is the bulk; fix likely small. May be 1 site, may be 3.
+
+**Start by:** Run with `-race` and read the stack traces. Identify whether the race is `worker.go` accessing shared state from a goroutine or test code asserting on production state without locking. Fix the smallest reproduction first.
 

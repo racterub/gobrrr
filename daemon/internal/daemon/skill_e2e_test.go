@@ -158,7 +158,9 @@ body
 	cm := clawhub.NewCommitter(skillsRoot, nil)
 	store := daemon.NewApprovalStore(approvalsRoot)
 	dispatcher := daemon.NewApprovalDispatcher(store)
-	dispatcher.Register("skill_install", daemon.NewSkillInstallHandlerForTesting(cm))
+	reg := skills.NewRegistry(skillsRoot)
+	require.NoError(t, reg.Refresh())
+	dispatcher.Register("skill_install", daemon.NewSkillInstallHandlerForTesting(cm, reg))
 
 	approval, err := dispatcher.Create("skill_install", "install noop@1.0.0", "",
 		[]string{"approve", "skip_binary", "deny"}, installReq, time.Hour)
