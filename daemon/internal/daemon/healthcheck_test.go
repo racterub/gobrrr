@@ -16,14 +16,15 @@ func timePtr(t time.Time) *time.Time {
 
 func TestHealthCheckerStuckTask(t *testing.T) {
 	q := daemon.NewQueue(filepath.Join(t.TempDir(), "q.json"))
-	task, err := q.Submit("test", "telegram", 1, false, 1, false) // 1 second timeout
+	_, err := q.Submit("test", "telegram", 1, false, 1, false) // 1 second timeout
 	require.NoError(t, err)
 
-	_, err = q.Next() // mark running
+	// Mutate StartedAt via Next's still-aliased return to simulate a stuck
+	// task. Get/Submit return snapshots, so the previous "task" pointer from
+	// Submit can no longer reach the queue's internal state.
+	running, err := q.Next() // mark running
 	require.NoError(t, err)
-
-	// Fake the start time to 10 seconds ago (> 2x timeout of 1s)
-	task.StartedAt = timePtr(time.Now().Add(-10 * time.Second))
+	running.StartedAt = timePtr(time.Now().Add(-10 * time.Second))
 	err = q.Flush()
 	require.NoError(t, err)
 
