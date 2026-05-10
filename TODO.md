@@ -277,37 +277,6 @@ The `channel/index.ts` Bun MCP process consumed all available memory (31GB) on t
 
 **Start by:** Confirm with user which direction. Default recommendation: delete. The launcher path is what production uses; the in-daemon mode adds risk for no current benefit.
 
-## Refactor #18 — Align uninstall `Refresh()` error handling with install (best-effort) — 2026-05-10
-
-**What:** `daemon/internal/daemon/skill_routes.go:95-98` returns HTTP 500 when `skillReg.Refresh()` fails after a successful uninstall. Refactor #17 established the opposite policy for the install path (`skill_install_handler.go:59-63`): log and swallow the refresh error because the on-disk state already changed and the next daemon start will re-load. Apply the same policy to uninstall so the two paths are symmetric.
-
-**Why:** Today, after `os.RemoveAll(<slug>)` succeeds and `Refresh()` happens to fail (e.g. a transient stat error on another skill dir), the HTTP response says the uninstall failed even though the skill is in fact gone. That's the same misleading-failure UX the spec for #17 explicitly rejected for install. The asymmetry is also confusing for anyone reading both code paths to understand the policy. Surfaced by the final reviewer of `fix/internal/skill-registry-refresh-after-install` as a non-blocking follow-up.
-
-**Files / docs:**
-- `daemon/internal/daemon/skill_routes.go:95-98` — current `if err := h.skillReg.Refresh(); err != nil { http.Error(...) }`
-- Reference: `daemon/internal/daemon/skill_install_handler.go:56-64` — the policy implementation to mirror
-- `docs/superpowers/specs/2026-05-10-skill-registry-refresh-design.md` — section "Refresh failure handling: best-effort" — the rationale (same applies to uninstall)
-- Optional: a small test in `skill_routes_test.go` (or wherever the uninstall handler is exercised) asserting that a refresh error doesn't surface as 500.
-
-**Constraints:**
-- The on-disk removal must still succeed before the swallow logic runs — if `os.RemoveAll` itself fails, return 500 as today.
-- Match the log format used in install: `log.Printf("skill_uninstall: registry refresh failed after remove: %v", err)`.
-- Don't break the existing happy-path response (HTTP 200, JSON body unchanged).
-
-**Acceptance criteria:**
-- [ ] `handleSkillsUninstall` logs and swallows `Refresh()` errors instead of returning 500.
-- [ ] If `os.RemoveAll` itself fails, the handler still returns 500.
-- [ ] Optional test confirms the new behavior (mirror the install handler's `RefreshErrorIsSwallowed` test if a Refresher seam is added to the route).
-- [ ] No other behavior change.
-
-**Out of scope:**
-- Changing the uninstall response shape.
-- Adding a Refresher interface to the skill_routes layer (the install handler has one because it's an approval handler with an existing fake-friendly seam; routes do not).
-
-**Estimated effort:** small — one log line + condition flip + maybe one test.
-
-**Start by:** Edit `skill_routes.go` to log+swallow. Run `cd daemon && go test ./...` to confirm nothing else relied on the 500.
-
 ## Refactor #19 — Fix data races in worker-pool tests flagged by `-race` — 2026-05-10
 
 **What:** `cd daemon && go test -race ./...` flags concurrent map/slice access in `TestWorkerPoolTaskResultStored`, `TestWorkerPoolRoutesWarmTask`, and `TestWorkerPoolWarmFallbackToCold`. The races reproduce on master — they predate the skill-registry-refresh branch — but the race detector is currently dirty so future refactors can't trust it as a regression gate.
