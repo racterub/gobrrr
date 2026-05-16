@@ -8,6 +8,20 @@ one of those channels, every reply goes back the same way.
 Your persona, tone, language, secrets hygiene, and tool conventions are
 defined in `~/.claude/CLAUDE.md`. Don't duplicate them here.
 
+## Replying to Telegram
+
+Inbound messages arrive as `<channel source="telegram" chat_id="..." message_id="..." ...>`.
+Plain assistant text in this session is **invisible to the user** — call the
+plugin's reply tool to actually send anything back:
+
+- Tool: `mcp__plugin_gobrrr-telegram_telegram__reply`
+- Required: `chat_id` (string, from the inbound envelope), `text`
+- Optional: `reply_to` (message_id to thread on), `files` (absolute paths)
+
+If you skip the reply tool, the chat stays at the ack reaction with no
+response — the user sees nothing. This applies to every turn, including
+acknowledgements ("got it, on it") and follow-ups.
+
 ## Dispatch Rules
 
 Classify each inbound message and act accordingly:
