@@ -30,7 +30,9 @@ CLI / Skills     ──▶   (Task queue)
 - **Daemon** listens on `~/.gobrrr/gobrrr.sock` (HTTP/1.1 over Unix socket)
 - **Workers** are `claude --print` processes with per-task settings.json permissions
 - **Memory** auto-injects relevant memories into worker prompts
-- **Identity** (`~/.gobrrr/identity.md`) injected into every worker prompt
+- **Worker prompt prefix** (`~/.gobrrr/worker.md`) injected into every worker prompt
+- **Launcher CLAUDE.md** (`~/workspace/CLAUDE.md`) loaded only by the always-on launcher session
+- **Shared global CLAUDE.md** (`~/.claude/CLAUDE.md`) loaded by both launcher and workers — persona, tone, conventions
 
 ## Build
 
@@ -71,7 +73,7 @@ daemon/                        Go daemon and CLI
       calendar.go              Calendar API (today, week, CRUD)
       boundary.go              UNTRUSTED marker wrapping
       retry.go                 Exponential backoff for Google API errors
-    identity/                  Load identity.md, build prompts
+    identity/                  Load worker.md (legacy identity.md fallback), build worker prompt prefix
     memory/                    Persistent memory store, tag search, relevance matching
     security/
       permissions.go           Per-task settings.json generation
@@ -96,7 +98,7 @@ schedules.json       Recurring task schedules (atomic writes)
 master.key           AES-256 encryption key (0600)
 gobrrr.sock          Unix socket (0600)
 queue.json           Persistent task queue (atomic writes)
-identity.md          Assistant identity (user-editable)
+worker.md            Worker prompt prefix, injected into every worker (user-editable)
 google/              Multi-account OAuth credentials (encrypted)
 memory/              Persistent memory entries + index
 skills/              Installed skills (system + ClawHub) — <slug>/SKILL.md + <slug>/_meta.json
@@ -139,7 +141,7 @@ Pending user-approval requests live under `~/.gobrrr/_approvals/<id>.json`. The 
 4. **UNTRUSTED boundaries** — All external content (emails, calendar events, web pages) wrapped in markers telling Claude to treat as data, not instructions.
 5. **Server-side write enforcement** — The daemon checks `allow_writes` on the task when it receives a write request, not the client. Prevents env var manipulation bypass.
 6. **JSON file persistence** — No SQLite (avoids cgo). Atomic writes via .tmp + rename. Good enough for 10-50 tasks/day single-user.
-7. **Identity + Memory injection** — Every worker gets identity.md + up to 10 relevant memories prepended to their prompt.
+7. **Worker prompt prefix + memory injection** — Every worker gets `~/.gobrrr/worker.md` (operating rules) + up to 10 relevant memories prepended to its prompt. Persona/tone lives in `~/.claude/CLAUDE.md`, loaded by both launcher and workers.
 
 ## Constraints
 

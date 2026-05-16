@@ -456,6 +456,15 @@ else
     echo "~/.claude/CLAUDE.md already exists, leaving it alone"
 fi
 
+install -d -o claude-agent -g claude-agent -m 0755 /home/claude-agent/workspace
+if [ ! -f /home/claude-agent/workspace/CLAUDE.md ]; then
+    install -o claude-agent -g claude-agent -m 0644 \
+        "$REPO_DIR/launcher.md.default" /home/claude-agent/workspace/CLAUDE.md
+    echo "Installed default ~/workspace/CLAUDE.md (launcher session)"
+else
+    echo "~/workspace/CLAUDE.md already exists, leaving it alone"
+fi
+
 # --- Step 20: Pre-trust workspace directory ---
 step "Pre-trusting workspace for Claude Code"
 
