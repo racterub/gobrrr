@@ -7,15 +7,21 @@ import (
 	"strings"
 )
 
-// Load reads identity.md from gobrrDir. The installer is responsible for
-// placing a default file; a missing file is an error.
+// Load reads the worker prompt prefix from gobrrDir. Primary path is
+// worker.md; falls back to legacy identity.md so existing installs keep
+// working until the next install.sh run migrates the file. The installer
+// is responsible for placing a default file; a missing file is an error.
 func Load(gobrrDir string) (string, error) {
-	path := filepath.Join(gobrrDir, "identity.md")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("reading identity.md: %w", err)
+	for _, name := range []string{"worker.md", "identity.md"} {
+		data, err := os.ReadFile(filepath.Join(gobrrDir, name))
+		if err == nil {
+			return string(data), nil
+		}
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("reading %s: %w", name, err)
+		}
 	}
-	return string(data), nil
+	return "", fmt.Errorf("no worker.md or identity.md in %s", gobrrDir)
 }
 
 // BuildPrompt concatenates identity + memories + task prompt with clear separators.

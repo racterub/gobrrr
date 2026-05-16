@@ -215,8 +215,8 @@ func TestWorkerPoolRoutesWarmTask(t *testing.T) {
 	queuePath := filepath.Join(dir, "queue.json")
 	q := NewQueue(queuePath)
 
-	// Write mock identity for warm worker.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "identity.md"), []byte("test identity"), 0644))
+	// Write mock worker prompt prefix for warm worker.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "worker.md"), []byte("test worker"), 0644))
 
 	// Write mock Claude script.
 	script := filepath.Join(dir, "mock-claude.sh")

@@ -431,17 +431,21 @@ mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
 chown claude-agent:claude-agent "$CLAUDE_SETTINGS"
 echo "Settings configured"
 
-# --- Step 19: Install default identity.md and CLAUDE.md ---
-step "Installing default identity.md and CLAUDE.md"
+# --- Step 19: Install default worker.md and CLAUDE.md ---
+step "Installing default worker.md and CLAUDE.md"
 
 install -d -o claude-agent -g claude-agent -m 0700 /home/claude-agent/.gobrrr
 
-if [ ! -f /home/claude-agent/.gobrrr/identity.md ]; then
-    install -o claude-agent -g claude-agent -m 0644 \
-        "$REPO_DIR/identity.md.default" /home/claude-agent/.gobrrr/identity.md
-    echo "Installed default identity.md"
+if [ -f /home/claude-agent/.gobrrr/worker.md ]; then
+    echo "worker.md already exists, leaving it alone"
+elif [ -f /home/claude-agent/.gobrrr/identity.md ]; then
+    mv /home/claude-agent/.gobrrr/identity.md /home/claude-agent/.gobrrr/worker.md
+    chown claude-agent:claude-agent /home/claude-agent/.gobrrr/worker.md
+    echo "Migrated legacy identity.md -> worker.md"
 else
-    echo "identity.md already exists, leaving it alone"
+    install -o claude-agent -g claude-agent -m 0644 \
+        "$REPO_DIR/worker.md.default" /home/claude-agent/.gobrrr/worker.md
+    echo "Installed default worker.md"
 fi
 
 if [ ! -f /home/claude-agent/.claude/CLAUDE.md ]; then

@@ -28,11 +28,11 @@ done
 	return script
 }
 
-// writeMockIdentity creates a minimal identity.md for testing.
+// writeMockIdentity creates a minimal worker.md for testing.
 func writeMockIdentity(t *testing.T, dir string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "identity.md"),
+		filepath.Join(dir, "worker.md"),
 		[]byte("You are a test assistant."),
 		0644,
 	))
