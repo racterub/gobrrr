@@ -432,6 +432,25 @@ mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
 chown claude-agent:claude-agent "$CLAUDE_SETTINGS"
 echo "Settings configured"
 
+# Register the dobrrr MCP server (user scope) so workers see mcp__dobrrr__* tools.
+# The account-level claude.ai servers (Gmail/Slack/Calendar) come with the login;
+# this local stdio proxy to the dobrrr HTTP API is the one server that must be
+# registered explicitly. The binary is a deploy prerequisite (built from the dobrrr
+# repo) — set DOBRRR_MCP_BIN if it is not on the default path.
+DOBRRR_MCP_BIN="${DOBRRR_MCP_BIN:-/usr/local/bin/dobrrr-mcp}"
+DOBRRR_BASE_URL="${DOBRRR_BASE_URL:-http://dobrrr.lab.local}"
+
+if [ ! -x "$DOBRRR_MCP_BIN" ]; then
+    echo "WARNING: dobrrr-mcp not found at $DOBRRR_MCP_BIN — skipping registration."
+    echo "         Place the binary (from the dobrrr repo) or set DOBRRR_MCP_BIN, then re-run."
+elif sudo -u claude-agent -i claude mcp get dobrrr &>/dev/null; then
+    echo "dobrrr MCP server already registered, skipping"
+else
+    sudo -u claude-agent -i claude mcp add -s user dobrrr \
+        -e "DOBRRR_BASE_URL=$DOBRRR_BASE_URL" -- "$DOBRRR_MCP_BIN"
+    echo "Registered dobrrr MCP server (user scope) -> $DOBRRR_MCP_BIN"
+fi
+
 # --- Step 19: Install default worker.md and CLAUDE.md ---
 step "Installing default worker.md and CLAUDE.md"
 
