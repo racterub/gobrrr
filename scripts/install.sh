@@ -199,7 +199,7 @@ if [ -d "$REPO_DIR/.git" ]; then
     if git -C "$REPO_DIR" remote get-url origin &>/dev/null; then
         echo "Updating existing repo..."
         git -C "$REPO_DIR" fetch origin
-        git -C "$REPO_DIR" reset --hard origin/main
+        git -C "$REPO_DIR" reset --hard origin/master
     else
         echo "Repo exists (no remote configured, skipping update)"
     fi
