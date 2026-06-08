@@ -44,3 +44,19 @@ func TestInstallSystemSkills_Idempotent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "# USER EDITED\n", string(got))
 }
+
+func TestInstallSystemSkills_InboxSweepPermissions(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, InstallSystemSkills(root))
+
+	metaBytes, err := os.ReadFile(filepath.Join(root, "inbox-sweep", "_meta.json"))
+	require.NoError(t, err)
+	var meta Meta
+	require.NoError(t, json.Unmarshal(metaBytes, &meta))
+
+	assert.Equal(t, "inbox-sweep", meta.Slug)
+	assert.Contains(t, meta.ApprovedReadPermissions, "mcp__claude_ai_Gmail__*")
+	assert.Contains(t, meta.ApprovedReadPermissions, "mcp__claude_ai_Slack__*")
+	assert.Contains(t, meta.ApprovedReadPermissions, "mcp__dobrrr__inbox_list")
+	assert.Contains(t, meta.ApprovedWritePermissions, "mcp__dobrrr__inbox_create")
+}
