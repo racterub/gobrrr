@@ -400,6 +400,7 @@ cat > "${CLAUDE_SETTINGS}.tmp" << 'SETTINGS'
       "Bash(claude *)",
       "Bash(gobrrr *)",
       "mcp__claude_ai_Gmail__*",
+      "mcp__claude_ai_Slack__*",
       "mcp__claude_ai_Google_Calendar__*",
       "mcp__plugin_gobrrr-telegram_telegram__*",
       "mcp__context7__*",
